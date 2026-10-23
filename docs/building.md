@@ -2,8 +2,9 @@
 
 This page has the details behind the short steps in the [README](../README.md).
 
-You always build from your **own** `default.xbe`. The build lifts the game's x86 code to C
-on your machine. The result contains code made from the game, so do not share it.
+You build from your **own** `default.xbe`. The build lifts the game's x86 code to C on your
+machine. The result contains code made from the game (and no game data). Ready-made builds are
+in [Releases](https://github.com/rashevskyv/conker-lr-recomp/releases) if you do not want to build.
 
 ## 1. The disc
 

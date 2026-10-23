@@ -9,8 +9,10 @@ natively on a hacked Nintendo Switch, on Linux and on Windows. It is not an emul
 lifts the game's x86 code to C and builds it for your platform. The Xbox GPU commands go to
 Vulkan (Switch) or OpenGL (all platforms).
 
-> **This repository has no game code and no game data.** You build the program yourself, from
-> your own copy of the game. What you build contains code made from the game: do not share it.
+> **This repository has no game code and no game data.** Ready-made builds are in
+> [Releases](https://github.com/rashevskyv/conker-lr-recomp/releases). They contain code made from the game, but no game data: you need
+> your **own unpacked copy** of the game. You can also build the program yourself, from your own
+> `default.xbe`.
 
 **Status:** the single player game is playable. The Switch runs it at a stable 30 fps. True
 16:9, 60 fps (experimental), a free camera and an in-game settings menu are included.
@@ -40,9 +42,11 @@ Multiplayer and Xbox Live do not work.
   hbmenu, and 5 GB free on the microSD card.
 - **Linux and Windows:** a GPU with OpenGL 3.3. A gamepad is optional: the keyboard works.
 
-## How to build and install
+## How to install
 
-More details are in [Building](docs/building.md).
+**The easy way:** download your platform from [Releases](https://github.com/rashevskyv/conker-lr-recomp/releases), unpack it, and put
+your unpacked game folder next to it (see the notes of the release). **Or build it yourself**
+from your own copy of the game, as below. More details are in [Building](docs/building.md).
 
 ### Step 1. Unpack your disc
 
@@ -177,8 +181,9 @@ More in [Troubleshooting](docs/troubleshooting.md).
 
 ## FAQ
 
-**Why is there no download?** A built program contains code made from the game, so it is not shared.
-You build it yourself from your own copy of the game.
+**Do the downloads include the game?** No. They have no game data (no disc files, textures or
+sound). You need your own unpacked copy of the game, retail NTSC (North America). The programs do
+contain code made from the game. If you prefer, build them yourself from your own `default.xbe`.
 
 **Can I use a PAL or another version?** Not tested. The build stops unless the XBE matches.
 
