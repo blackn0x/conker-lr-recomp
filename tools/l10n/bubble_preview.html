@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conker Bubble Preview</title>
+<style>
+:root { --bg:#f6f5f2; --panel:#fff; --ink:#1d1d1f; --muted:#6b6b70; --line:#d9d7d2; --bad:#b3261e; --ok:#1e7b34; --accent:#2f5fb3; }
+@media (prefers-color-scheme: dark) { :root { --bg:#17171a; --panel:#222226; --ink:#ececf0; --muted:#a0a0a8; --line:#3a3a40; --bad:#ff8a80; --ok:#7bd88f; --accent:#8ab4ff; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui, sans-serif; }
+header { padding:12px 16px; border-bottom:1px solid var(--line); display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+header h1 { font-size:16px; margin:0 12px 0 0; }
+label.file { border:1px solid var(--line); padding:4px 8px; border-radius:6px; background:var(--panel); cursor:pointer; }
+label.file input { display:none; }
+main { display:grid; grid-template-columns:minmax(260px, 360px) 1fr; gap:16px; padding:16px; }
+@media (max-width: 900px) { main { grid-template-columns:1fr; } }
+.panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; min-width:0; }
+#list { max-height:70vh; overflow:auto; font-size:13px; }
+#list div { padding:4px 6px; border-radius:4px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#list div:hover { background:var(--bg); }
+#list div.sel { outline:2px solid var(--accent); }
+#list div.bad::before { content:"● "; color:var(--bad); }
+#list div.ok::before { content:"● "; color:var(--ok); }
+textarea { width:100%; min-height:110px; font:14px/1.4 ui-monospace, monospace; background:var(--bg); color:var(--ink); border:1px solid var(--line); border-radius:6px; padding:8px; }
+input[type=number], input[type=search], select { background:var(--bg); color:var(--ink); border:1px solid var(--line); border-radius:4px; padding:3px 6px; }
+input[type=number] { width:64px; }
+canvas { width:100%; max-width:960px; image-rendering:auto; border-radius:6px; display:block; }
+.row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:8px 0; }
+.muted { color:var(--muted); }
+.warn { color:var(--bad); }
+.good { color:var(--ok); }
+button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:5px 10px; cursor:pointer; }
+button.alt { background:transparent; color:var(--ink); border:1px solid var(--line); }
+code { font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Conker: L&amp;R bubble preview</h1>
+  <label class="file">font.json <input type="file" id="fFont" accept=".json"></label>
+  <label class="file">atlas.png <input type="file" id="fAtlas" accept="image/png"></label>
+  <label class="file">text JSON <input type="file" id="fText" accept=".json"></label>
+  <button id="save" class="alt">Download edited JSON</button>
+  <span id="status" class="muted">Load the three files (made by conker_font.py export and conker_text.py export).</span>
+</header>
+<main>
+  <section class="panel">
+    <div class="row"><input type="search" id="q" placeholder="search key or text" style="flex:1">
+      <label><input type="checkbox" id="onlyBad"> do not fit</label></div>
+    <div class="row muted"><select id="bank"><option value="">all banks</option></select> <span id="count"></span></div>
+    <div id="list"></div>
+  </section>
+  <section class="panel">
+    <div class="row"><b id="key">-</b> <span id="voice" class="muted"></span></div>
+    <div class="row muted" id="source"></div>
+    <textarea id="text" spellcheck="false"></textarea>
+    <div class="row">
+      wrap <input type="number" id="wrap" value="20" min="5">
+      lines <input type="number" id="maxl" value="4" min="1">
+      scroll height <input type="number" id="sh" value="160" min="40">
+      <button class="alt" id="std">20 / 4 / 160 (original)</button>
+      <button class="alt" id="wide">40 / 6 / 240 (bubble=wide)</button>
+    </div>
+    <div class="row">paragraph <button class="alt" id="prev">◀</button> <span id="pnum">-</span> <button class="alt" id="next">▶</button>
+      <span id="info" class="muted"></span></div>
+    <canvas id="cv" width="640" height="480"></canvas>
+    <div id="warn" class="row"></div>
+    <p class="muted">Rules copied from the game: wrap 0x000DFD90 (count code words, break at the last space or {PMARKER} once the line passes the wrap width; a longer word stays whole), size 0x000E0B5E (width + 50, height + 40, or + 60 at the line limit; over the limit: width + 60, at least 150, fixed height, the text scrolls), a..z drawn as small capitals (0.81), text scale 0.81 × 0.9, letter spacing 1.625 and line pitch 25 px measured on a game frame. Button icons are drawn as boxes (estimate 24 font px). The real bubble shape, tail and position differ; the size is what matters.</p>
+  </section>
+</main>
+<script>
+const TAGS = {NORMAL:0xFFA1,RED:0xFFA2,GREEN:0xFFA3,BLUE:0xFFA4,YELLOW:0xFFA5,A:0xFFA8,B:0xFFA9,X:0xFFBC,Y:0xFFBD,JOYSTICK:0xFFBE,Z:0xFFAE,L:0xFFAF,R:0xFFB0,ARROW_LEFT:0xFFAA,ARROW_RIGHT:0xFFAB,ARROW_UP:0xFFAC,ARROW_DOWN:0xFFAD,SKULL:0xFFB2,SWIRL:0xFFB3,STAR:0xFFB4,LIGHTNING:0xFFB5,JIGGLE:0xFFA7,THROB:0xFFA6,PARAGRAPH:0xBD,THOUGHT:0xBE,ELECTRONIC:0xBF,TXT_MORE:0xFFBA,TXT_ST:0xFFB6,TXT_RD:0xFFB8,TXT_TH:0xFFB9,TXT_ND:0xFFB7,TXT_CURSOR:0xFFBB,TXT_JOYSTICK:0xFFB1,TXT_IGNORE:0x3E8,PMARKER:0xFE};
+const ZERO = new Set([0xFFA1,0xFFA2,0xFFA3,0xFFA4,0xFFA5,0xFFA6,0xFFA7,0xBE,0xBF,0xFE,0x3E8]);
+const COLORS = {0xFFA1:'#000',0xFFA2:'#c00000',0xFFA3:'#008000',0xFFA4:'#0040d0',0xFFA5:'#b08000'};
+const S = 0.81*0.9, SC = 0.81, SP = 1.625, LINE = 25, ICON = 24;
+let font=null, atlas=null, ink=null, doc=null, cur=null, para=0;
+const $ = id => document.getElementById(id);
+
+function units(t){ const out=[]; const re=/\{([^{}]*)\}/g; let i=0,m,unk=[];
+  while((m=re.exec(t))){ for(const ch of t.slice(i,m.index)) out.push([ch.codePointAt(0),ch]);
+    if(m[1] in TAGS) out.push([TAGS[m[1]],m[0]]); else {unk.push(m[0]); out.push([0xFFFF,m[0]]);} i=re.lastIndex; }
+  for(const ch of t.slice(i)) out.push([ch.codePointAt(0),ch]); return [out,unk]; }
+function wrap(p,W){ const o=p.slice(); let col=0,brk=-1;
+  for(let i=0;i<o.length;i++){ col++; const c=o[i][0]; if(c===0x20||c===0xFE) brk=i;
+    if(col>W && brk!==-1){ o[brk]=[0x0A,'\n']; col=i-brk; brk=-1; } }
+  const lines=[[]]; for(const u of o){ if(u[0]===0x0A) lines.push([]); else lines[lines.length-1].push(u); } return lines; }
+function glyph(c){ return font && font.map.get(c); }
+function adv(c){ const g=glyph(c)||glyph(0x25A1); return g?g.advance:0; }
+function lineW(l){ let w=0; for(const [c] of l){ if(c===0x20) w+=font.space_width+SP; else if(ZERO.has(c)); else if(c>=0x61&&c<=0x7A) w+=(adv(c-0x20)+SP)*SC; else if(c>=0xFFA1) w+=ICON; else w+=adv(c)+SP; } return w; }
+function layout(text,b){ const [us,unk]=units(text); const paras=[[]]; for(const u of us){ if(u[0]===0xBD) paras.push([]); else paras[paras.length-1].push(u); }
+  const res=[], warn=unk.map(t=>'unknown tag '+t);
+  paras.forEach((p,k)=>{ const lines=wrap(p,b.wrap); const tw=font?Math.max(...lines.map(lineW))*S:0, th=lines.length*LINE, n=lines.length;
+    let bw,bh; const scroll=n>b.lines; if(scroll){ bw=Math.max(tw+60,150); bh=b.sh; } else { bw=tw+50; bh=th+(n===b.lines?60:40); }
+    if(scroll) warn.push(`paragraph ${k+1}: ${n} lines > ${b.lines}, scrolls`);
+    lines.forEach(l=>{ if(l.length>b.wrap && !l.some(u=>u[0]===0x20||u[0]===0xFE)) warn.push(`paragraph ${k+1}: word longer than ${b.wrap}`); });
+    if(bw>600) warn.push(`paragraph ${k+1}: bubble ${Math.round(bw)} px wide`);
+    if(font) for(const [c,t] of p){ if(c<0xFFA1 && !ZERO.has(c) && c!==0x20 && !(c>=0x61&&c<=0x7A) && !glyph(c)) { warn.push(`no glyph for "${t}"`); break; } }
+    res.push({lines,tw,th,bw,bh,scroll}); });
+  if(us.length>511) warn.push(us.length+' code words: over 511 can overflow a game buffer');
+  return {paras:res, warn}; }
+
+function draw(){ const cv=$('cv'), g=cv.getContext('2d'); g.fillStyle='#4d6b3a'; g.fillRect(0,0,640,480);
+  g.fillStyle='#5f8045'; for(let i=0;i<8;i++){ g.fillRect(0,300+i*22,640,10); }
+  if(!cur){ return; } const b={wrap:+$('wrap').value,lines:+$('maxl').value,sh:+$('sh').value};
+  const L=layout($('text').value,b); para=Math.min(para,L.paras.length-1); const P=L.paras[para];
+  $('pnum').textContent=(para+1)+' / '+L.paras.length;
+  $('info').textContent=font?`text ${P.tw.toFixed(0)}×${P.th.toFixed(0)} px, bubble ${P.bw.toFixed(0)}×${P.bh.toFixed(0)} px, ${P.lines.length} lines`:'load font.json and atlas.png for pixel sizes';
+  $('warn').innerHTML=L.warn.length?L.warn.map(w=>`<span class="warn">${w}</span>`).join(' · '):'<span class="good">fits</span>';
+  const cx=320, cy=Math.max(20+P.bh/2, 150); g.fillStyle='rgba(235,232,220,0.93)'; g.beginPath(); g.ellipse(cx,cy,P.bw/2,P.bh/2,0,0,7); g.fill();
+  g.beginPath(); g.moveTo(cx-20,cy+P.bh/2-8); g.lineTo(cx+30,cy+P.bh/2+30); g.lineTo(cx+10,cy+P.bh/2-6); g.fill();
+  if(!font||!ink) return; g.save(); g.beginPath(); g.ellipse(cx,cy,P.bw/2,P.bh/2,0,0,7); g.clip();
+  const top = P.scroll ? cy-P.bh/2+20 : cy-P.th/2; let colour='#000';
+  P.lines.forEach((l,i)=>{ let x=cx-lineW(l)*S/2; const base=top+i*LINE+30*S*0.86;
+    for(const [c] of l){ if(COLORS[c]){ colour=COLORS[c]; continue; }
+      if(c===0x20){ x+=(font.space_width+SP)*S; continue; } if(ZERO.has(c)) continue;
+      if(c>=0xFFA1){ g.strokeStyle=colour; g.strokeRect(x+2,base-16,ICON*S-4,16); x+=ICON*S; continue; }
+      const small=c>=0x61&&c<=0x7A, k=small?SC:1, gl=glyph(small?c-0x20:c)||glyph(0x25A1); if(!gl) continue;
+      const dx=x+gl.xoff*k*S, dy=base-gl.ascent*k*S, w=gl.w*k*S, h=gl.h*k*S;
+      if(gl.w&&gl.h) g.drawImage(ink[colour]||tint(colour), gl.x, gl.y, gl.w, gl.h, dx, dy, w, h);
+      x+=(gl.advance+SP)*k*S; } });
+  g.restore(); }
+function tint(col){ const c=document.createElement('canvas'); c.width=atlas.width; c.height=atlas.height; const x=c.getContext('2d');
+  x.drawImage(atlas,0,0); const d=x.getImageData(0,0,c.width,c.height); const r=parseInt(col.slice(1).padEnd(3,'0').replace(/./g,'$&$&').slice(0,6),16);
+  for(let i=0;i<d.data.length;i+=4){ const a=d.data[i]; d.data[i]=r>>16; d.data[i+1]=(r>>8)&255; d.data[i+2]=r&255; d.data[i+3]=a; }
+  x.putImageData(d,0,0); ink[col]=c; return c; }
+
+function fits(e){ const b={wrap:+$('wrap').value,lines:+$('maxl').value,sh:+$('sh').value}; return layout(e.text,b).warn.length===0; }
+function renderList(){ if(!doc) return; const q=$('q').value.toLowerCase(), bank=$('bank').value, only=$('onlyBad').checked;
+  const rows=doc.strings.filter(e=>e.kind==='cutscene' && (!bank||e.bank===bank) && (!q||(e.key||'').toLowerCase().includes(q)||e.text.toLowerCase().includes(q)));
+  const shown=[]; for(const e of rows){ const f=fits(e); if(only&&f) continue; shown.push([e,f]); if(shown.length>800) break; }
+  $('count').textContent=shown.length+' lines'; $('list').innerHTML='';
+  for(const [e,f] of shown){ const d=document.createElement('div'); d.className=(f?'ok':'bad')+(e===cur?' sel':''); d.textContent=`${e.bank} · ${e.key} — ${e.text}`; d.onclick=()=>pick(e); $('list').appendChild(d); } }
+function pick(e){ cur=e; para=0; $('key').textContent=e.bank+' · '+e.key; $('text').value=e.text; $('source').textContent='source: '+e.source;
+  $('voice').textContent=(e.sounds||[]).map(s=>s.wav?`${s.wav} (${s.seconds}s)`:s.file).join(', '); renderList(); draw(); }
+
+function readJSON(f,cb){ const r=new FileReader(); r.onload=()=>cb(JSON.parse(r.result)); r.readAsText(f,'utf-8'); }
+function setFont(j){ j.map=new Map(); for(const g of j.glyphs) for(const c of g.chars) j.map.set(c,g); font=j; $('status').textContent='font: '+j.glyphs.length+' glyphs'; draw(); renderList(); }
+function setAtlas(src){ const img=new Image(); img.onload=()=>{ atlas=img; ink={}; tint('#000'); draw(); }; img.src=src; }
+function setText(j){ doc=j; const b=j.bubble||{}; $('wrap').value=b.wrap||20; $('maxl').value=b.max_lines||4; $('sh').value=b.scroll_height||160;
+  const banks=[...new Set(j.strings.filter(s=>s.kind==='cutscene').map(s=>s.bank))].sort(); $('bank').innerHTML='<option value="">all banks</option>'+banks.map(x=>`<option>${x}</option>`).join('');
+  $('status').textContent=j.language+': '+j.strings.length+' strings'; renderList(); const first=j.strings.find(s=>s.kind==='cutscene'); if(first) pick(first); }
+$('fFont').onchange=e=>readJSON(e.target.files[0],setFont);
+$('fAtlas').onchange=e=>setAtlas(URL.createObjectURL(e.target.files[0]));
+$('fText').onchange=e=>readJSON(e.target.files[0],setText);
+// optional: bubble_preview.html?font=font.json&atlas=atlas.png&text=en.json (from a local web server)
+const qs=new URLSearchParams(location.search);
+if(qs.get('font')) fetch(qs.get('font')).then(r=>r.json()).then(setFont);
+if(qs.get('atlas')) setAtlas(qs.get('atlas'));
+if(qs.get('text')) fetch(qs.get('text')).then(r=>r.json()).then(setText);
+$('text').oninput=()=>{ if(cur){ cur.text=$('text').value; draw(); } };
+['wrap','maxl','sh'].forEach(id=>$(id).oninput=()=>{ draw(); renderList(); });
+$('q').oninput=renderList; $('bank').onchange=renderList; $('onlyBad').onchange=renderList;
+$('prev').onclick=()=>{ para=Math.max(0,para-1); draw(); }; $('next').onclick=()=>{ para++; draw(); };
+$('std').onclick=()=>{ $('wrap').value=20; $('maxl').value=4; $('sh').value=160; draw(); renderList(); };
+$('wide').onclick=()=>{ $('wrap').value=40; $('maxl').value=6; $('sh').value=240; draw(); renderList(); };
+$('save').onclick=()=>{ if(!doc) return; const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify(doc,null,1)],{type:'application/json'})); a.download=(doc.language||'text')+'_edited.json'; a.click(); };
+draw();
+</script>
+</body>
+</html>

@@ -1,0 +1,216 @@
+/* clx_options.txt: the user's settings, one KEY=VALUE per line.
+ *
+ *   aspect=4:3 | 16:9          Hor+ 16:9 (wider view; HUD stretched)
+ *   fps=30 | 60                60 Hz (experimental; from the next start)
+ *   camera=classic | free      free: no automatic swing behind Conker
+ *   camera_invert_y=0 | 1      flip the right stick's vertical axis (camera_invert=1 too)
+ *   bubble=wide | classic      subtitle box 40 x 6 lines (default) or the game's 20 x 4
+ *   bubble_wrap= bubble_lines= bubble_height=   override the box (not in the menu)
+ *   fps_counter=0 | 1          FPS digits top-left (RECOMP_FPS_OSD)
+ *   volume=0..100              (RECOMP_AUDIO_VOLUME)
+ *   scale_handheld=150         render scale % (Switch handheld; on a PC the render scale)
+ *   scale_docked=225           render scale % (Switch docked)
+ *   aniso=16                   anisotropic filtering 1/2/4/8/16 (Vulkan)
+ *   fxaa=1                     FXAA on the presented frame (Vulkan)
+ *   button_glyphs=switch|xbox|ps   button icons (default switch on the Switch, xbox on a PC)
+ *   key_<control>=<key>        PC keyboard: the key for a pad control, SDL key names
+ *                              (key_a=Space, key_rs_up=Up; controls in input/sdl_keys.h)
+ *
+ * Where: sdmc:/switch/clx/clx_options.txt on the Switch; elsewhere
+ * CLX_OPTIONS or ./clx_options.txt. The same variable set in clx_env.txt or
+ * the environment wins over the file at boot (CLX_ASPECT, CLX_FPS, ...), except
+ * fps_counter and volume: the file wins (clx_env.txt ships RECOMP_FPS_OSD=1). */
+#include "clx_settings.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#if CLX_PC_INPUT
+#include "input/sdl_keys.h"
+
+/* Key and pad bindings set from the file or the menu, as file lines
+ * ("key_a=Return", "pad_a=b"): written back on save, cleared on reset. */
+static char s_bind[64][48];
+static int s_nbind;
+
+int clx_bind(const char *name, const char *v)
+{
+    int i, ok = !strncmp(name, "key_", 4) ? xbox_keys_bind(name + 4, v)
+              : !strncmp(name, "pad_", 4) ? xbox_pad_bind(name + 4, v) : 0;
+    size_t n = strlen(name);
+    if (!ok)
+        return 0;
+    for (i = 0; i < s_nbind; i++)
+        if (!strncmp(s_bind[i], name, n) && s_bind[i][n] == '=')
+            break;
+    if (i < 64) {
+        snprintf(s_bind[i], sizeof s_bind[i], "%s=%s", name, v);
+        if (i == s_nbind)
+            s_nbind++;
+    }
+    return 1;
+}
+
+void clx_bind_reset(void)
+{
+    s_nbind = 0;
+    xbox_keys_reset();
+    xbox_pad_reset();
+}
+#endif
+
+#if defined(_WIN32) && !defined(setenv)
+/* MinGW has no setenv. */
+#define setenv(k, v, overwrite) ((overwrite) || !getenv(k) ? _putenv_s((k), (v)) : 0)
+#endif
+
+ClxSettings g_clx = {
+#if defined(__SWITCH__)
+    0, 0, 0, 0, 1, 0, 100, 150, 225, 16, 1, 1    /* Switch button icons */
+#else
+    0, 0, 0, 0, 1, 0, 100, 100, 225, 16, 1, 0    /* PC: render scale 100%, Xbox icons */
+#endif
+};
+
+const char *clx_options_path(void)
+{
+#if defined(__SWITCH__)
+    return "sdmc:/switch/clx/clx_options.txt";
+#else
+    const char *e = getenv("CLX_OPTIONS");
+    return e && *e ? e : "clx_options.txt";
+#endif
+}
+
+static int on(const char *v)
+{
+    return v && (*v == '1' || !strncmp(v, "on", 2));
+}
+
+void clx_options_load(void)
+{
+    FILE *f = fopen(clx_options_path(), "r");
+    char line[128];
+    const char *e;
+
+    if (f) {
+        while (fgets(line, sizeof line, f)) {
+            char *v = strchr(line, '='), *nl;
+            if (!v || line[0] == '#')
+                continue;
+            *v++ = 0;
+            if ((nl = strpbrk(v, "\r\n")))
+                *nl = 0;
+            if (!strcmp(line, "aspect")) g_clx.aspect169 = !strcmp(v, "16:9");
+            else if (!strcmp(line, "fps")) g_clx.fps60 = atoi(v) == 60;
+            else if (!strcmp(line, "camera")) g_clx.cam_free = !strcmp(v, "free");
+            else if (!strcmp(line, "camera_invert_y") || !strcmp(line, "camera_invert"))
+                g_clx.cam_invert = on(v);
+            else if (!strcmp(line, "bubble")) g_clx.bubble_wide = strncmp(v, "classic", 7) != 0;
+            else if (!strcmp(line, "bubble_wrap")) setenv("CLX_BUBBLE_WRAP", v, 0);
+            else if (!strcmp(line, "bubble_lines")) setenv("CLX_BUBBLE_LINES", v, 0);
+            else if (!strcmp(line, "bubble_height")) setenv("CLX_BUBBLE_HEIGHT", v, 0);
+            else if (!strcmp(line, "fps_counter")) setenv("RECOMP_FPS_OSD", on(v) ? "1" : "0", 1);
+            else if (!strcmp(line, "volume")) setenv("RECOMP_AUDIO_VOLUME", v, 1);
+            else if (!strcmp(line, "scale_handheld")) g_clx.scale_handheld = atoi(v);
+            else if (!strcmp(line, "scale_docked")) g_clx.scale_docked = atoi(v);
+            else if (!strcmp(line, "aniso")) g_clx.aniso = atoi(v);
+            else if (!strcmp(line, "fxaa")) g_clx.fxaa = atoi(v) != 0;
+            else if (!strcmp(line, "button_glyphs"))
+                g_clx.glyphs = !strcmp(v, "xbox") ? 0 : !strcmp(v, "ps") ? 2 : 1;
+#if CLX_PC_INPUT
+            else if ((!strncmp(line, "key_", 4) || !strncmp(line, "pad_", 4)) && !clx_bind(line, v))
+                fprintf(stderr, "[options] unknown binding %s=%s\n", line, v);
+#endif
+        }
+        fclose(f);
+    }
+    /* The environment (clx_env.txt) wins, as before the menu existed. */
+    if ((e = getenv("CLX_ASPECT"))) g_clx.aspect169 = !strcmp(e, "16:9");
+    if ((e = getenv("CLX_FPS"))) g_clx.fps60 = atoi(e) == 60;
+    if ((e = getenv("CLX_CAM_FREE"))) g_clx.cam_free = *e == '1';
+    if ((e = getenv("CLX_CAM_INVERT_Y"))) g_clx.cam_invert = *e == '1';
+    if ((e = getenv("CLX_BUBBLE"))) g_clx.bubble_wide = strncmp(e, "classic", 7) != 0;
+    g_clx.fps_osd = on(getenv("RECOMP_FPS_OSD"));
+    if ((e = getenv("RECOMP_AUDIO_VOLUME"))) g_clx.volume = atoi(e);
+    if (g_clx.volume < 0 || g_clx.volume > 100) g_clx.volume = 100;
+    if (g_clx.scale_docked < 50 || g_clx.scale_docked > 400) g_clx.scale_docked = 225;
+    if (g_clx.scale_handheld < 50 || g_clx.scale_handheld > 400) g_clx.scale_handheld = 150;
+    if (g_clx.aniso < 1) g_clx.aniso = 1;
+    if (g_clx.aniso > 16) g_clx.aniso = 16;
+    /* What the boot code reads (main.c, the renderers). */
+    setenv("CLX_ASPECT", g_clx.aspect169 ? "16:9" : "4:3", 0);
+    printf("[options] %s: aspect %s, fps %d, camera %s%s, subtitles %s, FPS counter %s, volume %d,"
+           " scale handheld %d%% docked %d%%, aniso %dx, FXAA %s\n", clx_options_path(),
+           g_clx.aspect169 ? "16:9" : "4:3", g_clx.fps60 ? 60 : 30,
+           g_clx.cam_free ? "free" : "classic", g_clx.cam_invert ? " (inverted)" : "",
+           g_clx.bubble_wide ? "wide" : "classic", g_clx.fps_osd ? "on" : "off", g_clx.volume,
+           g_clx.scale_handheld, g_clx.scale_docked, g_clx.aniso, g_clx.fxaa ? "on" : "off");
+}
+
+/* The keys the menu owns; any other line of the file is kept as it was. */
+static const char *const k_keys[] = {
+    "aspect", "fps", "camera", "camera_invert_y", "camera_invert", "bubble", "fps_counter",
+    "volume", "scale_handheld", "scale_docked", "aniso", "fxaa", "button_glyphs",
+};
+
+static int owned(const char *line)
+{
+    size_t i, n;
+    for (i = 0; i < sizeof k_keys / sizeof k_keys[0]; i++) {
+        n = strlen(k_keys[i]);
+        if (!strncmp(line, k_keys[i], n) && line[n] == '=')
+            return 1;
+    }
+#if CLX_PC_INPUT
+    if (!strncmp(line, "key_", 4) || !strncmp(line, "pad_", 4))
+        return 1;
+#endif
+    return 0;
+}
+
+int clx_options_save(void)
+{
+    const char *path = clx_options_path();
+    char tmp[512], line[256];
+    FILE *in = fopen(path, "r"), *out;
+
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    if (!(out = fopen(tmp, "w"))) {
+        if (in) fclose(in);
+        fprintf(stderr, "[options] cannot write %s\n", tmp);
+        return 0;
+    }
+    if (in) {
+        while (fgets(line, sizeof line, in))
+            if (!owned(line))
+                fputs(line, out);
+        fclose(in);
+    }
+    fprintf(out, "aspect=%s\nfps=%d\ncamera=%s\ncamera_invert_y=%d\nbubble=%s\nfps_counter=%d\n"
+            "volume=%d\nscale_handheld=%d\nscale_docked=%d\naniso=%d\nfxaa=%d\nbutton_glyphs=%s\n",
+            g_clx.aspect169 ? "16:9" : "4:3", g_clx.fps60 ? 60 : 30,
+            g_clx.cam_free ? "free" : "classic", g_clx.cam_invert ? 1 : 0,
+            g_clx.bubble_wide ? "wide" : "classic", g_clx.fps_osd ? 1 : 0, g_clx.volume,
+            g_clx.scale_handheld, g_clx.scale_docked, g_clx.aniso, g_clx.fxaa ? 1 : 0,
+            g_clx.glyphs == 0 ? "xbox" : g_clx.glyphs == 2 ? "ps" : "switch");
+#if CLX_PC_INPUT
+    {
+        int i;
+        for (i = 0; i < s_nbind; i++)
+            fprintf(out, "%s\n", s_bind[i]);
+    }
+#endif
+    if (fclose(out) != 0) {
+        remove(tmp);
+        return 0;
+    }
+    remove(path);                       /* FAT on the Switch: rename does not replace */
+    if (rename(tmp, path) != 0) {
+        fprintf(stderr, "[options] cannot replace %s\n", path);
+        return 0;
+    }
+    printf("[options] saved %s\n", path);
+    return 1;
+}

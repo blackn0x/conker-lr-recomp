@@ -1,0 +1,133 @@
+[
+ {
+  "note": "Conker seeds. The main thread's StartContext1 (FO2 0x1320F9 equivalent) is 0x0042F075 (entry 0x0042F0E9 - 0x74, the same distance as FO2); tools.disasm finds it as an immediate, so it needs no seed. FO2's XPP seed addresses could not be matched (no FO2 XBE); the XPP class-driver table below covers the same class."
+ },
+ {
+  "start": "0x00558C9D",
+  "note": "XPP: class-driver table entry at 0x0055850C (table 0x005582E0-0x00558560); code right after a ret, no padding, in a gap no function covered. Found by scanning the table for code pointers that are not function starts (as FO2/B3/Carbon's XPP seeds: without them the pad may enumerate but never attach)."
+ },
+ {
+  "start": "0x0055A788",
+  "note": "XPP: class-driver table entry at 0x005583F4 (table 0x005582E0-0x00558560); code right after a ret, no padding, in a gap no function covered. Found by scanning the table for code pointers that are not function starts (as FO2/B3/Carbon's XPP seeds: without them the pad may enumerate but never attach)."
+ },
+ {
+  "start": "0x0055DF38",
+  "note": "XPP: class-driver table entry at 0x00558510 (table 0x005582E0-0x00558560); code right after a ret, no padding, in a gap no function covered. Found by scanning the table for code pointers that are not function starts (as FO2/B3/Carbon's XPP seeds: without them the pad may enumerate but never attach)."
+ },
+ {
+  "start": "0x0055EB46",
+  "note": "XPP: class-driver table entry at 0x005584B0 (table 0x005582E0-0x00558560); code right after a ret, no padding, in a gap no function covered. Found by scanning the table for code pointers that are not function starts (as FO2/B3/Carbon's XPP seeds: without them the pad may enumerate but never attach)."
+ },
+ {
+  "start": "0x0055EB98",
+  "note": "XPP: class-driver table entry at 0x005584F8 (table 0x005582E0-0x00558560); code right after a ret, no padding, in a gap no function covered. Found by scanning the table for code pointers that are not function starts (as FO2/B3/Carbon's XPP seeds: without them the pad may enumerate but never attach)."
+ },
+ {
+  "start": "0x0055EF7B",
+  "note": "XPP: class-driver table entry at 0x0055852C/0x00558544 (table 0x005582E0-0x00558560); code right after a ret, no padding, in a gap no function covered. Found by scanning the table for code pointers that are not function starts (as FO2/B3/Carbon's XPP seeds: without them the pad may enumerate but never attach)."
+ },
+ {
+  "start": "0x0055F59A",
+  "note": "XPP: class-driver table entry at 0x00558528/0x00558540 (table 0x005582E0-0x00558560); code right after a ret, no padding, in a gap no function covered. Found by scanning the table for code pointers that are not function starts (as FO2/B3/Carbon's XPP seeds: without them the pad may enumerate but never attach)."
+ },
+ {
+  "start": "0x003FA4F0",
+  "observed": true,
+  "note": "Indirect-call target observed at runtime ([ICALL] Failed, then a crash at guest 0xCCCCCCF8): code after int3 padding behind a 5-entry jump table, swallowed by sub_003FA320. Pointer stored at 0x00480657."
+ },
+ {
+  "start": "0x0042F075",
+  "observed": true,
+  "note": "PsCreateSystemThreadEx StartContext1 observed at runtime (main thread; tools.disasm also finds it as an immediate)."
+ },
+ {
+  "start": "0x00248670",
+  "note": "Same shape as 0x003FA4F0, found by scanning every function for 16-aligned code after int3 padding that something references: after a 5-entry jump table inside sub_002485F0; stored as a callback by `mov [0x00807670], 0x00248670`."
+ },
+ {
+  "start": "0x00016620",
+  "note": "Same scan as 0x00248670: after int3 padding inside sub_000165C0; passed as a function pointer (`mov ebx, 0x16620; mov edi, 0x165C0` at 0x000162C0)."
+ },
+ {
+  "start": "0x0002D710",
+  "observed": true,
+  "note": "Observed at runtime ([ICALL] Failed, then a crash at 0x8B1975FF): a method in 33 vtables in .rdata, after a byte jump table + int3 padding the linear sweep lost phase in. tools.disasm now finds this class itself (test_data_ptr_realign.py); kept as the measurement."
+ },
+ {
+  "start": "0x00499849",
+  "observed": true,
+  "note": "XNET: indirect-call target observed at runtime ([ICALL] Failed); code right after a ret, pointed to by a table at 0x0049A27C inside XNET (a code section, so the data-pointer pass does not scan it)."
+ },
+ {
+  "start": "0x000D70B0",
+  "note": "Pointer in .rdata/.data at 0x597B24 to code right after a ret, in a gap no function covered (or the tail of one that ends at that ret), with a function-like start. Found by scanning data sections for code pointers that are not function starts; tools.disasm's data-pointer pass does not take these (cause not yet found, CLAUDE.md)."
+ },
+ {
+  "start": "0x001350E0",
+  "note": "Pointer in .rdata/.data at 0x747D58 to code right after a ret, in a gap no function covered (or the tail of one that ends at that ret), with a function-like start. Found by scanning data sections for code pointers that are not function starts; tools.disasm's data-pointer pass does not take these (cause not yet found, CLAUDE.md)."
+ },
+ {
+  "start": "0x001371C0",
+  "note": "Pointer in .rdata/.data at 0x747D7C to code right after a ret, in a gap no function covered (or the tail of one that ends at that ret), with a function-like start. Found by scanning data sections for code pointers that are not function starts; tools.disasm's data-pointer pass does not take these (cause not yet found, CLAUDE.md)."
+ },
+ {
+  "start": "0x00145060",
+  "note": "Pointer in .rdata/.data at 0x58E8FC to code right after a ret, in a gap no function covered (or the tail of one that ends at that ret), with a function-like start. Found by scanning data sections for code pointers that are not function starts; tools.disasm's data-pointer pass does not take these (cause not yet found, CLAUDE.md)."
+ },
+ {
+  "start": "0x00153340",
+  "note": "Pointer in .rdata/.data at 0x5915F8 (+4) to code right after a ret, in a gap no function covered (or the tail of one that ends at that ret), with a function-like start. Found by scanning data sections for code pointers that are not function starts; tools.disasm's data-pointer pass does not take these (cause not yet found, CLAUDE.md)."
+ },
+ {
+  "start": "0x001664E0",
+  "note": "Pointer in .rdata/.data at 0x595ABC to code right after a ret, in a gap no function covered (or the tail of one that ends at that ret), with a function-like start. Found by scanning data sections for code pointers that are not function starts; tools.disasm's data-pointer pass does not take these (cause not yet found, CLAUDE.md)."
+ },
+ {
+  "start": "0x00167530",
+  "note": "Pointer in .rdata/.data at 0x6B7614 to code right after a ret, in a gap no function covered (or the tail of one that ends at that ret), with a function-like start. Found by scanning data sections for code pointers that are not function starts; tools.disasm's data-pointer pass does not take these (cause not yet found, CLAUDE.md)."
+ },
+ {
+  "start": "0x00180CB0",
+  "note": "Pointer in .rdata/.data at 0x6B7744 to code right after a ret, in a gap no function covered (or the tail of one that ends at that ret), with a function-like start. Found by scanning data sections for code pointers that are not function starts; tools.disasm's data-pointer pass does not take these (cause not yet found, CLAUDE.md)."
+ },
+ {
+  "start": "0x001AF3C0",
+  "note": "Pointer in .rdata/.data at 0x5908D8 (+2) to code right after a ret, in a gap no function covered (or the tail of one that ends at that ret), with a function-like start. Found by scanning data sections for code pointers that are not function starts; tools.disasm's data-pointer pass does not take these (cause not yet found, CLAUDE.md)."
+ },
+ {
+  "start": "0x0027BC10",
+  "note": "Pointer in .rdata/.data at 0x600978 to code right after a ret, in a gap no function covered (or the tail of one that ends at that ret), with a function-like start. Found by scanning data sections for code pointers that are not function starts; tools.disasm's data-pointer pass does not take these (cause not yet found, CLAUDE.md)."
+ },
+ {
+  "start": "0x0029D0D0",
+  "note": "Pointer in .rdata/.data at 0x590E18 to code right after a ret, in a gap no function covered (or the tail of one that ends at that ret), with a function-like start. Found by scanning data sections for code pointers that are not function starts; tools.disasm's data-pointer pass does not take these (cause not yet found, CLAUDE.md)."
+ },
+ {
+  "start": "0x004B1FF9",
+  "note": "Pointer in .rdata/.data at 0x881FB0 to code right after a ret, in a gap no function covered (or the tail of one that ends at that ret), with a function-like start. Found by scanning data sections for code pointers that are not function starts; tools.disasm's data-pointer pass does not take these (cause not yet found, CLAUDE.md)."
+ },
+ {
+  "start": "0x00123600",
+  "observed": true,
+  "note": "Observed at runtime in the Profiles menu ([ICALL] Failed x130): right after sub_00123290's jump table, pointed to from .rdata 0x00593570. tools.disasm now takes this shape too (test_data_ptr_realign.py)."
+ },
+ {
+  "start": "0x00359E00",
+  "observed": true,
+  "note": "Observed loading Beach Dead (Dumbots Solo): [ICALL] Failed, then the loader spun in sub_0005FFE0. A tail-jump thunk after int3 padding, stored by a static initialiser (`mov [0x0084D338], 0x00359E00` at 0x004805B6); the immediate pass skips it because the sweep is out of phase there."
+ },
+ {
+  "start": "0x00359FF0",
+  "note": "Tail-jump target of 0x00359E00; starts right where sub_00359F80 ends, not detected."
+ },
+ {
+  "start": "0x001C1400",
+  "observed": true,
+  "note": "Observed in Beach Dead (Dumbots): [ICALL] Failed, then the round ended at once (Tediz win, SHC never spawned). Stored as an immediate by code at 0x001BE14F/0x001BE157; tools.disasm's immediate pass now takes this shape (test_imm_ref_boundaries.py)."
+ },
+ {
+  "start": "0x001C16A0",
+  "observed": true,
+  "note": "Observed in Beach Dead (Dumbots): [ICALL] Failed, then the round ended at once (Tediz win, SHC never spawned). Stored as an immediate by code at 0x001BE14F/0x001BE157; tools.disasm's immediate pass now takes this shape (test_imm_ref_boundaries.py)."
+ }
+]

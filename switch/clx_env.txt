@@ -1,0 +1,70 @@
+# clx_env.txt -- KEY=VALUE per line, '#' comments. Sits next to the NRO as
+# sdmc:/switch/clx/clx_env.txt; the log then lists every setting as
+# "[switch] env KEY=VALUE". switch/build.sh stages this copy only when the
+# SD has none, so edits on the card are kept.
+
+# GL calls on a thread of their own (pushbuffer decoding and the driver on
+# two cores). Set to 0 to compare. (clx.nro only.)
+RECOMP_GL_THREAD=1
+
+# Vulkan (clx-vulkan.nro; these are its defaults on the Switch, listed to
+# compare): recording on its own thread (core 2), present on a worker
+# thread, the frame sent to the GPU every 300 draws. 0 turns one off.
+RECOMP_VK_THREAD=1
+RECOMP_VK_ASYNC_PRESENT=1
+RECOMP_VK_KICK=300
+# Guest lock handed over by guest priority. 0 = FIFO with 1 ms grace.
+RECOMP_GIL_EAGER=1
+RECOMP_AUDIO_VOLUME=100
+
+# Playing, not testing: =1 no log file, no [perf] reports, no profiler.
+NFSU2_NO_LOG=0
+
+# Off-screen draw culling in the executor (an NFSU2 speed-up). Off: on
+# the console it cost more executor time (10%) than drawing itself (7%).
+RECOMP_CULL=0
+
+# Diagnosing slowness: 1 kHz samples of the busy threads into
+# sdmc:/switch/clx/prof.bin -- bring it back with clx_log.txt.
+# Comment out when just playing.
+RECOMP_NX_PROFILE=1
+# Frame cost: one "[ft]" line per second in clx_log.txt (fps, frame ms, CPU ms
+# per frame of the game/executor/recording/present threads, the game's wait for
+# the GPU, GPU ms from timestamps (Vulkan), draws and compiles).
+RECOMP_FRAME_STATS=1
+
+# Clocks: the docked rates, in both modes (more heat and battery handheld).
+# The log shows "[clock] ...". Comment out for the system's (CPU 1020 MHz);
+# the game thread is CPU-bound, so the CPU clock helps directly.
+# CLX_DOCK_BOOST=1 instead (with these commented out): boost while docked only.
+NFSU2_CPU_MHZ=1785
+NFSU2_GPU_MHZ=768
+NFSU2_MEM_MHZ=1600
+
+# Picture per mode is in clx_options.txt (scale_docked, scale_handheld,
+# aniso, fxaa). RECOMP_GL_SCALE=1.5 here would force one scale for both.
+
+# Boot movie (MS Game Studios logo + multiplayer montage, BootIntro.xmv): 1 = skip
+# it (swapped for the blank black.xmv; deleting the file hangs the boot), 0 = play it.
+CLX_SKIP_INTRO=0
+# Cutscenes: press = they play, a press of + (START), A or L skips one (also the
+# first viewing); 1 = every cutscene ends as soon as it starts (for testing);
+# 0 = the title's own rules (L, only for cutscenes already watched).
+CLX_SKIP_CUTSCENES=press
+# Picture: Conker renders 4:3 only (no 16:9 mode in the game), shown with side
+# bars. RECOMP_WIDESCREEN=1 stretches it to the full 16:9 screen instead.
+#RECOMP_WIDESCREEN=1
+# Camera: up/down turn speed on the right stick, x the game's own (2 = about the
+# left/right speed; 1 = original).
+#CLX_CAM_PITCH=2
+# BACK (-) opens the Xbox Live sign-up, so it is switched off; 0 gives it back.
+#RECOMP_PAD_MASK=0
+# FPS top-left on screen + "[fps1] N" in clx_log.txt every second.
+RECOMP_FPS_OSD=1
+# Input lag: one "[lat]" line per pad change in clx_log.txt (pad -> frame decoded
+# -> submitted -> GPU done, ms). Present waits on the last frame (CLX_LOW_LATENCY=0:
+# the title's two frames in flight).
+#RECOMP_LAT_TRACE=1
+# Title menu: 1 = the cursor starts on Game 1 (single player; A -> New Game / Play),
+# 0 = the title's own start on Xbox Live & Co (multiplayer).
+CLX_START_SINGLE=1

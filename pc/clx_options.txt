@@ -1,0 +1,29 @@
+# Conker: Live & Reloaded (PC build): options, one key=value per line.
+# The game reads this file and saves it from its settings menu (Esc).
+# Full list: docs/settings-and-controls.md.
+
+# Folder with the unpacked disc (the one with default.xbe). Or give it on the command line.
+# (read by clx.sh / clx.bat)
+#game=/home/you/conker-disc
+
+# Render scale in percent of 640x480 (200 = 1280x960). Default 100.
+scale_handheld=200
+# 4:3 (default, side bars) or 16:9 (true Hor+ widescreen; HUD and menus stretched)
+aspect=4:3
+# 30 (default) or 60 (experimental; from the next start)
+fps=30
+# camera=free: the camera does not swing back behind Conker
+#camera=free
+# 1 = flip the right stick vertical axis
+#camera_invert_y=1
+# Subtitle box: wide (40 x 6, default) or classic (the game's 20 x 4)
+#bubble=wide
+# FPS counter top-left
+#fps_counter=1
+# Sound volume, 0-100
+#volume=100
+# Keyboard: key_<control>=<SDL key name>, for example key_a=Return
+#key_a=Space
+
+# 1 = skip the boot movie (read by clx.sh / clx.bat)
+#skip_intro=1

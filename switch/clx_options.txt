@@ -1,0 +1,5 @@
+scale_docked=225
+scale_handheld=150
+aniso=16
+fxaa=1
+aspect=4:3
