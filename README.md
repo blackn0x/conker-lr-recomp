@@ -1,4 +1,4 @@
-# Conker: Live & Reloaded for Switch, Linux and Windows
+### Conker: Live & Reloaded for Switch, Linux and Windows
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Nintendo Switch](https://img.shields.io/badge/platform-Nintendo%20Switch-red) ![No game data](https://img.shields.io/badge/game%20data-not%20included-lightgrey)
 
