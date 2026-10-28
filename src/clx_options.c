@@ -13,6 +13,8 @@
  *   aniso=16                   anisotropic filtering 1/2/4/8/16 (Vulkan)
  *   fxaa=1                     FXAA on the presented frame (Vulkan)
  *   button_glyphs=switch|xbox|ps   button icons (default switch on the Switch, xbox on a PC)
+ *   fullscreen=borderless|window   borderless fullscreen on a PC (Alt+Enter/F11 toggles)
+ *   mouse=0|1                  native mouse camera (F8 toggles at run time)
  *   key_<control>=<key>        PC keyboard: the key for a pad control, SDL key names
  *                              (key_a=Space, key_rs_up=Up; controls in input/sdl_keys.h)
  *
@@ -119,6 +121,11 @@ void clx_options_load(void)
             else if (!strcmp(line, "fxaa")) g_clx.fxaa = atoi(v) != 0;
             else if (!strcmp(line, "button_glyphs"))
                 g_clx.glyphs = !strcmp(v, "xbox") ? 0 : !strcmp(v, "ps") ? 2 : 1;
+            else if (!strcmp(line, "fullscreen"))
+                setenv("CLX_BORDERLESS",
+                       (!strcmp(v, "borderless") || !strcmp(v, "fullscreen") || on(v)) ? "1" : "0", 0);
+            else if (!strcmp(line, "mouse"))
+                setenv("CLX_NATIVE_MOUSE", on(v) ? "1" : "0", 0);
 #if CLX_PC_INPUT
             else if ((!strncmp(line, "key_", 4) || !strncmp(line, "pad_", 4)) && !clx_bind(line, v))
                 fprintf(stderr, "[options] unknown binding %s=%s\n", line, v);

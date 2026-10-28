@@ -1,0 +1,8 @@
+# Native mouse camera. Restart the game after changing these values.
+# Degrees of camera rotation per mouse pixel: lower = slower, higher = faster.
+sensitivity=0.06
+# Vertical sensitivity. 0 or absent = same as sensitivity.
+sensitivity_y=0.06
+# 1 = mouse up looks up (normal); 0 = inverted.
+invert_x=0
+invert_y=1

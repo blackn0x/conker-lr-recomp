@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <stdatomic.h>
 
 #if CLX_PC_INPUT
 #include "input/sdl_keys.h"
@@ -71,7 +72,10 @@ static const Item k_items[] = {
 #define NITEMS ((int)(sizeof k_items / sizeof k_items[0]))
 #define VIS 11                   /* lines shown at once; the list scrolls */
 
-static int s_open, s_sel, s_top, s_restart_note, s_armed, s_done;
+static atomic_int s_open;
+static int s_sel, s_top, s_restart_note, s_armed, s_done;
+
+int clx_menu_is_open(void) { return s_open; }
 
 #if CLX_PC_INPUT
 /* The remap wizard: one control after the other. The pad walks the first
