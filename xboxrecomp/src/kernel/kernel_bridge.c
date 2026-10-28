@@ -473,6 +473,8 @@ static int g_thread_call_count = 0;
  *
  * ponytail: linear table of 64 threads; titles create a handful. */
 #define GUEST_THREADS_MAX 64
+static RECOMP_TLS int g_kernel_dispatch_slot = -1;
+static RECOMP_TLS int t_gil_depth;                  /* the guest lock, defined below */
 static struct { uint32_t kthread; DWORD tid; HANDLE h; } s_guest_threads[GUEST_THREADS_MAX];
 static SRWLOCK s_guest_threads_lock = SRWLOCK_INIT;
 
@@ -643,7 +645,7 @@ static CRITICAL_SECTION   s_gil_cs;
 static CONDITION_VARIABLE s_gil_cv;
 static volatile uint64_t  s_gil_next, s_gil_serving;
 static volatile int       s_gil_on = -1;
-static RECOMP_TLS int     t_gil_depth;
+/* t_gil_depth: declared with the thread registry */
 
 static int gil_enabled(void)
 {
@@ -769,10 +771,46 @@ static void gil_unlock(void)
     LeaveCriticalSection(&s_gil_cs);
 }
 
+/* Every thread that runs guest code (the main thread, the timer/DPC, USB and
+ * graphics interrupt threads, spawned workers): where its registers live, for
+ * the stall dump below. Filled when the thread first enters guest code. */
+#define DBG_THREADS_MAX 32
+static struct {
+    volatile LONG tid;
+    const char *name;
+    uint32_t *esp_p;
+    int *slot_p;
+    int *gil_p;
+} s_dbg_threads[DBG_THREADS_MAX];
+static RECOMP_TLS int t_dbg_reg;
+static RECOMP_TLS const char *t_dbg_name;
+
+/* Name the calling thread in the stall dump (call before it runs guest code). */
+void xbox_thread_name(const char *name)
+{
+    t_dbg_name = name;
+}
+
+static void dbg_register_thread(void)
+{
+    int i;
+    t_dbg_reg = 1;
+    for (i = 0; i < DBG_THREADS_MAX; i++)
+        if (InterlockedCompareExchange(&s_dbg_threads[i].tid, (LONG)GetCurrentThreadId(), 0) == 0) {
+            s_dbg_threads[i].name = t_dbg_name ? t_dbg_name : (t_gil_main ? "main" : "?");
+            s_dbg_threads[i].esp_p = &g_esp;
+            s_dbg_threads[i].slot_p = &g_kernel_dispatch_slot;
+            s_dbg_threads[i].gil_p = &t_gil_depth;
+            return;
+        }
+}
+
 void xbox_gil_enter(void)
 {
     if (!gil_enabled())
         return;
+    if (!t_dbg_reg)
+        dbg_register_thread();
     if (t_gil_depth++ == 0)
         gil_lock();
 }
@@ -889,6 +927,7 @@ static DWORD WINAPI bridge_thread_main(LPVOID param)
     }
     free(s);
     guest_thread_self();
+    xbox_thread_name("worker");
     xbox_nx_retag_thread((void *)fn);
     xbox_guest_pin(0);
 
@@ -3343,6 +3382,7 @@ static DWORD WINAPI kernel_timer_thread(LPVOID unused)
     int slot = xbox_worker_stack_alloc();
 
     (void)unused;
+    xbox_thread_name("timer/DPC");
     xbox_guest_pin(1);             /* DPCs and vblank: interrupt-like, guest core */
     {
         extern void xbox_nx_raise_timer_thread(void);   /* win32_compat.c */
@@ -10203,10 +10243,52 @@ static void kernel_watch_arm_once(void)
         g_kernel_watch_va = (uint32_t)strtoul(env, NULL, 0);
 }
 
-/* Current dispatching slot */
-static RECOMP_TLS int g_kernel_dispatch_slot = -1;
+/* Current dispatching slot: defined with the thread registry above. */
 
 static void kernel_thunk_dispatch_body(void);
+
+/* Stall report: every guest thread's state -- the last kernel call it made
+ * (a blocked thread sits in its blocking one), whether it holds the guest
+ * lock, and the code addresses on its guest stack -- and the guest locks held
+ * and awaited. The watchdog's own dump shows the main thread only, which in a
+ * deadlock between two guest threads is half the picture. Reads other
+ * threads' TLS through the pointers they registered: racy, for a log. */
+void xbox_cs_dump(void);                       /* kernel_rtl.c */
+extern uint32_t g_xbox_code_lo, g_xbox_code_hi;
+
+void xbox_threads_dump(void)
+{
+    int i;
+    fprintf(stderr, "  [threads] dump:\n");
+    for (i = 0; i < DBG_THREADS_MAX; i++) {
+        DWORD tid = (DWORD)s_dbg_threads[i].tid;
+        uint32_t esp, w, k, n;
+        int slot, gil;
+        ULONG ord;
+        if (!tid || !s_dbg_threads[i].esp_p)
+            continue;
+        esp = *s_dbg_threads[i].esp_p;
+        slot = s_dbg_threads[i].slot_p ? *s_dbg_threads[i].slot_p : -1;
+        gil = s_dbg_threads[i].gil_p ? *s_dbg_threads[i].gil_p : 0;
+        ord = slot >= 0 && slot < XBOX_KERNEL_THUNK_TABLE_SIZE ? g_slot_ordinals[slot] : 0;
+        fprintf(stderr, "  [threads] tid %lu (%s): last kernel call ordinal %lu,"
+                        " guest lock %s, esp 0x%08X, code addresses on the stack:",
+                (unsigned long)tid, s_dbg_threads[i].name, (unsigned long)ord,
+                gil > 0 ? "held" : "not held", esp);
+        if (esp >= 0x00010000u && esp < 0x04000000u - 4096u) {
+            for (k = 0, n = 0; k < 512 && n < 24; k++) {
+                w = *(const uint32_t *)((uintptr_t)(esp + k * 4) + g_xbox_mem_offset);
+                if (w >= g_xbox_code_lo && w < g_xbox_code_hi) {
+                    fprintf(stderr, " %08X", w);
+                    n++;
+                }
+            }
+        }
+        fprintf(stderr, "\n");
+    }
+    xbox_cs_dump();
+    fflush(stderr);
+}
 
 /* Every kernel call is marked busy for its whole length (bridge locks, the CRT
  * lock behind fprintf, the host heap), except while it blocks in a host wait;

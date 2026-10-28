@@ -43,6 +43,10 @@ void clx_bind_reset(void);
 void clx_buttons_hook(unsigned int va, unsigned int color, unsigned int w, unsigned int h,
                       unsigned int *argb);
 
+/* A one-line prompt at the bottom of the screen for ms milliseconds
+ * (clx_menu.c; NULL hides it; nothing while the menu is open). */
+void clx_prompt(const char *text, unsigned ms);
+
 /* The in-game menu (clx_menu.c): usb_gamepad_hook. */
 void clx_menu_hook(unsigned char *report, unsigned host_buttons);
 

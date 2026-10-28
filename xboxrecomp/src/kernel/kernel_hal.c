@@ -12,6 +12,7 @@
  */
 
 #include "kernel.h"
+#include "../../include/xbox/recomp_regs.h"        /* g_fs_base */
 #include <stdio.h>
 #include <stdlib.h>
 #if defined(_WIN32)
@@ -38,6 +39,35 @@
  * ============================================================================ */
 
 static XBOX_THREAD_LOCAL KIRQL g_current_irql = PASSIVE_LEVEL;
+
+extern ptrdiff_t g_xbox_mem_offset;
+
+/* The guest's own copy of IRQL: the byte at fs:[0x24] (KPCR.Irql), which the
+ * XDK libraries read inline instead of calling KeGetCurrentIrql. DirectSound
+ * decides by it whether to take its critical section ("if IRQL is 0, lock",
+ * guest 0x004C38BE) and whether to raise ("if below DISPATCH", 0x004C36B0).
+ * Nothing wrote it, so it read 0 for every thread: DirectSound took its lock
+ * in DPC and raised sections too, where the console skips it. That inverted
+ * the lock order against the dispatch lock below (a raised thread holds it and
+ * waits for DirectSound's lock; the lock's owner waits to raise): the freeze
+ * after 4-5 minutes in 0.48's console log (2026-10-27), guest threads idle
+ * with "IRQL depth 2". Per thread, like the TIB it lives in; set after the
+ * transition completes. RECOMP_IRQL_MIRROR=0 turns it off. */
+static void irql_mirror(KIRQL level)
+{
+    static int on = -1;
+    uint32_t fs;
+
+    if (on < 0) {
+        const char *e = getenv("RECOMP_IRQL_MIRROR");
+        on = !(e && *e == '0');
+        fprintf(stderr, "  [IRQL] guest fs:[0x24] follows KfRaiseIrql / KfLowerIrql: %s\n",
+                on ? "on" : "off (RECOMP_IRQL_MIRROR=0)");
+    }
+    fs = g_fs_base;
+    if (on && fs)
+        *(volatile uint8_t *)((uintptr_t)(fs + 0x24) + g_xbox_mem_offset) = (uint8_t)level;
+}
 
 /* How many threads are holding IRQL at or above DISPATCH_LEVEL.
  *
@@ -252,6 +282,7 @@ KIRQL __fastcall xbox_KfRaiseIrql(KIRQL NewIrql)
     irql_track(old, NewIrql, IRQL_CALLER());
     irql_transition(old, NewIrql);
     g_current_irql = NewIrql;
+    irql_mirror(NewIrql);
     return old;
 }
 
@@ -289,6 +320,7 @@ VOID __fastcall xbox_KfLowerIrql(KIRQL NewIrql)
     irql_track(g_current_irql, NewIrql, IRQL_CALLER());
     irql_transition(g_current_irql, NewIrql);
     g_current_irql = NewIrql;
+    irql_mirror(NewIrql);
 }
 
 /*
@@ -301,6 +333,7 @@ KIRQL __stdcall xbox_KeRaiseIrqlToDpcLevel(void)
     irql_track(old, DISPATCH_LEVEL, IRQL_CALLER());
     irql_transition(old, DISPATCH_LEVEL);
     g_current_irql = DISPATCH_LEVEL;
+    irql_mirror(DISPATCH_LEVEL);
     return old;
 }
 

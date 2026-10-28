@@ -40,6 +40,16 @@ While the menu is open, the game gets no input. It keeps running: a cutscene goe
 The list scrolls (about 11 lines at once). On a PC the window's close button
 and Alt+F4 also quit (the settings are saved if the menu is open).
 
+## Skipping movies and cutscenes
+
+A, START (+) or L skips a cutscene, also one seen for the first time; the
+first press only shows "SKIP THIS CUTSCENE? PRESS AGAIN", and a second press
+within 3 seconds skips it. Cutscenes the game marks unskippable play to the
+end. The boot movie and other movies work the same way with A or START
+("SKIP THIS MOVIE? PRESS AGAIN"). `CLX_SKIP_CUTSCENES` in `clx_env.txt`:
+`press` (default), `all` (also the unskippable ones), `1` (every cutscene
+ends at once), `0` (the game's own rules).
+
 ## clx_options.txt
 
 The menu saves its values here. You can also edit the file with a text editor. One
@@ -65,8 +75,6 @@ The menu saves its values here. You can also edit the file with a text editor. O
 | `aniso` | `1`, `2`, `4`, `8`, `16` | Anisotropic filtering (Vulkan build). |
 | `fxaa` | `0`, `1` | FXAA (Vulkan build). |
 | `button_glyphs` | `switch`, `xbox`, `ps` | Button icons in the game (default: Switch on the Switch, Xbox on a PC). |
-| `fullscreen` | `borderless`, `window` | PC: borderless fullscreen. Also toggled with Alt+Enter or F11. |
-| `mouse` | `0`, `1` | PC: native mouse camera (default on). F8 releases/captures it. |
 | `key_<control>` | a key name | PC keyboard binding. See below. |
 | `pad_<control>` | a pad input | PC gamepad binding. See below. |
 
@@ -184,4 +192,4 @@ Start the Windows build with `clx.bat` (`clx.sh` on Linux). Mouse and borderless
 fullscreen are enabled from `clx_options.txt` with `mouse=1` and
 `fullscreen=borderless`; both are in the shipped PC options file.
 
-Not available yet: key rebinding inside the menu, a window-size setting.
+Not yet: a window-size setting.

@@ -345,6 +345,38 @@ static void perf_report(void)
     }
 }
 
+/* A hang shows as frames that stop or a guest thread that waits for a lock
+ * for seconds: say where every guest thread is, at 3 s of a lock wait or 6 s
+ * of no frame, and again 12 s later (at most 4 reports; 0.62-0.48 had only
+ * the 20 s one, which a user closing the game never reached). */
+static void stall_watch(void)
+{
+    static uint32_t seen;
+    static unsigned still, reports, tick, last_tick;
+    static int presented;
+    uint32_t f = nv2a_gl_frame_count();
+    int cs_wait, stalled;
+    void xbox_WatchdogDump(const char *why);
+    int xbox_cs_waiting_long(unsigned ms);
+
+    tick++;
+    if (f != seen) {
+        seen = f;
+        presented = 1;
+        still = 0;
+    } else {
+        still++;                                   /* 0.5 s units */
+    }
+    cs_wait = xbox_cs_waiting_long(3000);
+    stalled = presented && still >= 12;
+    if ((cs_wait || stalled) && reports < 4 && (!reports || tick - last_tick >= 24)) {
+        reports++;
+        last_tick = tick;
+        xbox_WatchdogDump(cs_wait ? "a guest thread waits for a lock for 3 s"
+                                  : "no frame for 6 s");
+    }
+}
+
 static void *log_flusher(void *arg)
 {
     unsigned n = 0;
@@ -355,6 +387,7 @@ static void *log_flusher(void *arg)
             break;
         if (++n % 20 == 0)
             perf_report();
+        stall_watch();
         log_flush(1);
     }
     return NULL;
@@ -363,6 +396,10 @@ static void *log_flusher(void *arg)
 static int log_open(void)
 {
     s_log_buf = (char *)malloc(LOG_CAP);
+    /* Keep the last run's log: the next boot used to truncate the one with
+     * the crash in it (FAT: rename does not replace). */
+    remove(NFSU2_SWITCH_DIR "/clx_log" CLX_RUN_TAG ".prev.txt");
+    rename(NFSU2_SWITCH_DIR "/clx_log" CLX_RUN_TAG ".txt", NFSU2_SWITCH_DIR "/clx_log" CLX_RUN_TAG ".prev.txt");
     s_log_fd = open(NFSU2_SWITCH_DIR "/clx_log" CLX_RUN_TAG ".txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (!s_log_buf || s_log_fd < 0 || AddDevice(&s_log_dev) < 0)
         return 0;
