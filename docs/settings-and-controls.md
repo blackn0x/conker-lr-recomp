@@ -187,6 +187,11 @@ Settings live in `clx_mouse_options.txt` next to the executable:
 | `sensitivity_y` | the same vertically (0 or absent: use `sensitivity`) |
 | `invert_x` | `1` reverses left/right |
 | `invert_y` | `1` = mouse up looks up (the shipped default); `0` = inverted |
+| `aim_gain` | extra gain while a weapon's aim camera is active (default 1.8) |
+
+The mouse also drives the weapon aim camera (frying pan, baseball bat); the
+slingshot's aim and the vehicles keep the pad. The aim camera turns more
+slowly than the normal one, hence `aim_gain`.
 
 Start the Windows build with `clx.bat` (`clx.sh` on Linux). Mouse and borderless
 fullscreen are enabled from `clx_options.txt` with `mouse=1` and

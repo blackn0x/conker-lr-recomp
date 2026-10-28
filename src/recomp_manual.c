@@ -1058,13 +1058,11 @@ void sub_002F99A0(void)
 {
     static float k = -1.0f;
     int free_cam = g_clx.cam_free, invert_y = g_clx.cam_invert;   /* the menu changes them */
-    uint32_t cam = ecx, cfg, inp = eax;
+    uint32_t cam = ecx, cfg, inp = eax, ret = MEM32(esp);
     int32_t ry = 0;
     float saved = 0.0f, follow = 0.0f, kk;
     float mouse_yaw = 0.0f, mouse_pitch = 0.0f;
-    int mouse_on = 0, stick_rx = 0, stick_ry = 0;
-    int32_t in14 = 0, in18 = 0, in1C = 0, in20 = 0;
-    int have_in = 0;
+    int mouse_on = 0;
 
     if (k < 0.0f) {
         const char *e = getenv("CLX_CAM_PITCH");
@@ -1094,38 +1092,47 @@ void sub_002F99A0(void)
          * the player camera comes back; 400 lines at most. */
         static uint32_t other;
         static int lines;
-        uint32_t ret = MEM32(esp);
         if (ret != 0x0003CB1Cu && ret != other && lines < 400) {
             lines++;
             fprintf(stderr, "[cam] camera user 0x%08X%s starts\n", ret - 5,
-                    ret == 0x002BBB54u ? " (aim)" : "");
+                    ret == 0x002BBB54u ? " (aim)" :
+                    ret == 0x002FBC10u ? " (pan)" : "");
         } else if (ret == 0x0003CB1Cu && other && lines < 400) {
             lines++;
             fprintf(stderr, "[cam] player camera again (after 0x%08X)\n", other - 5);
         }
         other = ret == 0x0003CB1Cu ? 0 : ret;
     }
-    if (MEM32(esp) != 0x0003CB1Cu) {
+    if (ret != 0x0003CB1Cu && ret != 0x002FBC10u) {
         /* Invert too: the slingshot's aim has the game's own "Invert Aim"
          * (pause Options). Flipping it here sent shots the other way
-         * (user report, 0.45 with camera_invert_y=1). */
+         * (user report, 0.45 with camera_invert_y=1). Vehicles keep the
+         * title's tuning as well. */
         free_cam = 0, kk = 1.0f, invert_y = 0;
+        clx_mouse_set_mode(0);
     } else {
-        static int seen;
-        if (!seen++)
-            fprintf(stderr, "[cam] player camera (0x0003CB17): pitch x%g, auto-follow %s\n",
-                    (double)k, free_cam ? "off" : "on");
-        /* Mouse camera (clx_mouse.c): one frame's motion becomes a right-stick
-         * deflection written into this call's input block below, so it uses
-         * the stick path without touching the pad state. Player camera only
-         * (the slingshot's aim and the vehicles keep the pad). */
+        int pan = ret == 0x002FBC10u;   /* frying pan / first-person aim */
+        clx_mouse_set_mode(pan ? 2 : 1);
+        if (!pan) {
+            static int seen;
+            if (!seen++)
+                fprintf(stderr, "[cam] player camera (0x0003CB17): pitch x%g, auto-follow %s\n",
+                        (double)k, free_cam ? "off" : "on");
+        } else {
+            /* The pan's aim camera keeps the title's tuning; only the mouse
+             * stick is fed into it. */
+            free_cam = 0, kk = 1.0f, invert_y = 0;
+        }
+        /* clx_mouse.c adds the mouse deflection to the pad report itself, so
+         * every camera/aim user sees it exactly like the right stick. This
+         * wrapper only tracks that the mouse is driving the camera (for the
+         * free camera and the capture timeout). */
         if (cam >= 0x10000u && cam < 0x03FFF000u &&
-            cfg >= 0x10000u && cfg < 0x03FFF000u && !MEM32(cam + 0x80)) {
+            cfg >= 0x10000u && cfg < 0x03FFF000u &&
+            (pan || !MEM32(cam + 0x80))) {
             mouse_on = clx_mouse_take(cam, &mouse_yaw, &mouse_pitch);
-            if (mouse_on) {
+            if (mouse_on && !pan)
                 free_cam = 1;                /* no swing-back while the mouse drives it */
-                clx_mouse_stick(cam, &stick_rx, &stick_ry);
-            }
         }
     }
     if (cfg < 0x00010000u || cfg >= 0x04000000u || (kk == 1.0f && !free_cam && !invert_y)) {
@@ -1146,17 +1153,6 @@ void sub_002F99A0(void)
     if (invert_y && inp >= 0x00010000u && inp < 0x04000000u) {
         ry = (int32_t)MEM32(inp + 0x18);
         MEM32(inp + 0x18) = (uint32_t)(-ry);
-    }
-    /* The mouse's deflection goes into the right-stick fields for this call
-     * only (restored below). */
-    if (mouse_on && (stick_rx || stick_ry) && inp >= 0x00010000u && inp < 0x03FFF000u) {
-        have_in = 1;
-        in14 = (int32_t)MEM32(inp + 0x14); in18 = (int32_t)MEM32(inp + 0x18);
-        in1C = (int32_t)MEM32(inp + 0x1C); in20 = (int32_t)MEM32(inp + 0x20);
-        MEM32(inp + 0x14) = (uint32_t)stick_rx;
-        MEM32(inp + 0x18) = (uint32_t)stick_ry;
-        MEM32(inp + 0x1C) = (uint32_t)stick_rx;
-        MEM32(inp + 0x20) = (uint32_t)stick_ry;
     }
     /* camera=free: no ramp-up (settings +0x0C/+0x10 lerp the rate from 1 to
      * 2 over +0x14 seconds of holding: both 1.5, a constant speed) and a
@@ -1182,12 +1178,6 @@ void sub_002F99A0(void)
     }
     if (invert_y && inp >= 0x00010000u && inp < 0x04000000u)
         MEM32(inp + 0x18) = (uint32_t)ry;
-    if (have_in) {
-        MEM32(inp + 0x14) = (uint32_t)in14;
-        MEM32(inp + 0x18) = (uint32_t)in18;
-        MEM32(inp + 0x1C) = (uint32_t)in1C;
-        MEM32(inp + 0x20) = (uint32_t)in20;
-    }
     if (free_cam)
         MEMF(cam + 0xBC) = follow;
 }

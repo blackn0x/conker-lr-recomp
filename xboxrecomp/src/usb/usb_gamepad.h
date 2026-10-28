@@ -48,6 +48,10 @@ int usb_gamepad_report(int dev, uint8_t *out, int max);
  * the menu); a RECOMP_PAD_SCRIPT press is already in the report. */
 extern void (*usb_gamepad_hook)(uint8_t *report, unsigned host_buttons);
 
+/* A port may add its own host input (for example a mouse camera) to pad 1's
+ * finished 20-byte report. Called after usb_gamepad_hook, before the title. */
+extern void (*usb_gamepad_mouse_hook)(uint8_t *report);
+
 /* An output report from the host: the 6-byte rumble report
  * (id 0, length 6, left and right motor speeds as little-endian words),
  * from interrupt endpoint 2 or a class SET_REPORT. Forwarded to the host
