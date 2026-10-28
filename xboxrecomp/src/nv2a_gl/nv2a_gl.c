@@ -2626,11 +2626,17 @@ swap:
     gl_step_done("swap");
     tex_bind_forget();
     {
+        extern void clx_mouse_frame(SDL_Window *window);
+        extern void clx_mouse_motion(int dx, int dy);
         SDL_Event e;
-        while (SDL_PollEvent(&e))       /* the window's close button, Alt+F4 */
+        while (SDL_PollEvent(&e)) {     /* the window's close button, Alt+F4 */
             if (e.type == SDL_QUIT
                 || (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_CLOSE))
                 recomp_host_quit("window closed");
+            if (e.type == SDL_MOUSEMOTION)
+                clx_mouse_motion(e.motion.xrel, e.motion.yrel);
+        }
+        clx_mouse_frame(s_win);
     }
 }
 

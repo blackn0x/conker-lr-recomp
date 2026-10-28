@@ -32,6 +32,8 @@
 #include "recomp_funcs.h"
 #include "platform/frame_stats.h"
 #include "clx_settings.h"
+#include "clx_mouse.h"
+
 
 /* ── ICALL trace ring buffer ───────────────────────────────── */
 
@@ -920,6 +922,41 @@ void recomp_unimpl(const char *text, uint32_t va)
  * (about the yaw speed), 1 = the title's own. Found: memory snapshots while
  * the right stick was held (pitch at camera+0x8C ran to the -45 limit),
  * a gdb write watchpoint on it, then the disassembly. */
+/* The camera's right-stick response curve (0x002F9E50 reads this table at
+ * 0x00747798: six (input, output) pairs). Its first segment is a deadzone:
+ * input below 0.4 gives 0, so a small mouse pulse did nothing. While the
+ * mouse is captured, replace it with a straight line; restore the game's
+ * table when the mouse is released, so a real pad keeps its own feel. */
+void clx_camera_curve_mouse(int on)
+{
+    static float original[6][2];
+    static int saved;
+    static const float linear[6][2] = {
+        { 0.0f, 0.0f }, { 0.2f, 0.2f }, { 0.4f, 0.4f },
+        { 0.6f, 0.6f }, { 0.8f, 0.8f }, { 1.0f, 1.0f },
+    };
+    int i;
+    if (on) {
+        if (!saved) {
+            for (i = 0; i < 6; i++) {
+                original[i][0] = MEMF(0x00747798u + (unsigned)i * 8);
+                original[i][1] = MEMF(0x0074779Cu + (unsigned)i * 8);
+            }
+            saved = 1;
+        }
+        for (i = 0; i < 6; i++) {
+            MEMF(0x00747798u + (unsigned)i * 8) = linear[i][0];
+            MEMF(0x0074779Cu + (unsigned)i * 8) = linear[i][1];
+        }
+    } else if (saved) {
+        for (i = 0; i < 6; i++) {
+            MEMF(0x00747798u + (unsigned)i * 8) = original[i][0];
+            MEMF(0x0074779Cu + (unsigned)i * 8) = original[i][1];
+        }
+        saved = 0;
+    }
+}
+
 extern void sub_002F99A0_gen(void);
 
 void sub_002F99A0(void)
@@ -929,6 +966,10 @@ void sub_002F99A0(void)
     uint32_t cam = ecx, cfg, inp = eax;
     int32_t ry = 0;
     float saved = 0.0f, follow = 0.0f;
+    float mouse_yaw = 0.0f, mouse_pitch = 0.0f;
+    int mouse_on = 0, stick_rx = 0, stick_ry = 0;
+    int32_t in14 = 0, in18 = 0, in1C = 0, in20 = 0;
+    int have_in = 0;
 
     if (k < 0.0f) {
         const char *e = getenv("CLX_CAM_PITCH");
@@ -948,6 +989,30 @@ void sub_002F99A0(void)
                 (double)k, free_cam ? "off" : "on");
     }
     cfg = cam ? MEM32(cam) : 0;
+    /* Mouse camera (clx_mouse.c): one frame's motion becomes a right-stick
+     * deflection. It is written into this camera call's input block, below,
+     * so it uses the same stick path as the arrow keys without touching the
+     * global pad or keyboard state. This wrapper only detects capture, to
+     * keep the free camera and widen the pitch limits. Writing the camera's
+     * angle fields here was tried and changed controller state without
+     * moving the rendered view. */
+    if (cam >= 0x10000u && cam < 0x03FFF000u &&
+        cfg >= 0x10000u && cfg < 0x03FFF000u && !MEM32(cam + 0x80)) {
+        mouse_on = clx_mouse_take(cam, &mouse_yaw, &mouse_pitch);
+        if (mouse_on) {
+            free_cam = 1;                    /* no swing-back while the mouse drives it */
+            clx_mouse_stick(cam, &stick_rx, &stick_ry);
+        }
+    }
+    {
+        static int dbg = -1, calls;
+        if (dbg < 0)
+            dbg = getenv("CLX_MOUSE_DEBUG") != NULL;
+        if (dbg && (calls++ % 30 == 0))
+            fprintf(stderr, "[cam-call] n=%d cam=%08X cfg=%08X trans=%u yaw=%.4f pitch=%.2f free=%d mouse=%d\n",
+                    calls, cam, cfg, cam ? MEM32(cam + 0x80) : 0,
+                    MEMF(cam + 4), MEMF(cam + 0x40), free_cam, mouse_on);
+    }
     if (cfg < 0x00010000u || cfg >= 0x04000000u || (k == 1.0f && !free_cam && !invert_y)) {
         sub_002F99A0_gen();
         return;
@@ -971,6 +1036,18 @@ void sub_002F99A0(void)
      * 2 over +0x14 seconds of holding: both 1.5, a constant speed) and a
      * wider pitch range (+0x18/+0x1C, -45/55 in the first field: -55/65).
      * Restored after the call (the settings are shared). */
+    /* The mouse's one-frame deflection goes into the input block the right
+     * stick uses, for this camera call only. It is not a button or a pad
+     * state, so the normal keyboard and controller path is untouched. */
+    if (mouse_on && (stick_rx || stick_ry) && inp >= 0x00010000u && inp < 0x03FFF000u) {
+        have_in = 1;
+        in14 = (int32_t)MEM32(inp + 0x14); in18 = (int32_t)MEM32(inp + 0x18);
+        in1C = (int32_t)MEM32(inp + 0x1C); in20 = (int32_t)MEM32(inp + 0x20);
+        MEM32(inp + 0x14) = (uint32_t)stick_rx;
+        MEM32(inp + 0x18) = (uint32_t)stick_ry;
+        MEM32(inp + 0x1C) = (uint32_t)stick_rx;
+        MEM32(inp + 0x20) = (uint32_t)stick_ry;
+    }
     {
         float r0 = 0.0f, r1 = 0.0f, lo = 0.0f, hi = 0.0f;
         if (free_cam) {
@@ -991,8 +1068,23 @@ void sub_002F99A0(void)
     }
     if (invert_y && inp >= 0x00010000u && inp < 0x04000000u)
         MEM32(inp + 0x18) = (uint32_t)ry;
+    if (have_in) {
+        MEM32(inp + 0x14) = (uint32_t)in14;
+        MEM32(inp + 0x18) = (uint32_t)in18;
+        MEM32(inp + 0x1C) = (uint32_t)in1C;
+        MEM32(inp + 0x20) = (uint32_t)in20;
+    }
     if (free_cam)
         MEMF(cam + 0xBC) = follow;
+    if (mouse_on) {
+        static int dbg = -1, logged;
+        if (dbg < 0)
+            dbg = getenv("CLX_MOUSE_DEBUG") != NULL;
+        if (dbg && (mouse_yaw != 0.0f || mouse_pitch != 0.0f) && logged++ < 120)
+            fprintf(stderr, "[mouse-angle] cam=%08X yaw=%.4f pitch=%.2f d=%.3f,%.2f\n",
+                    cam, MEMF(cam + 4), MEMF(cam + 0x40),
+                    mouse_yaw * 57.2957795f, mouse_pitch);
+    }
 }
 
 /* -- 60 fps (CLX_FPS=60, fps=60 in clx_options.txt; default 30) --

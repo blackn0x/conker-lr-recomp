@@ -149,6 +149,7 @@ if has linux; then
     strip "$DEST/clx" 2>/dev/null || true
     cp "$REPO/pc/clx.sh" "$DEST/clx.sh"; chmod +x "$DEST/clx.sh"
     [ -f "$DEST/clx_options.txt" ] || cp "$REPO/pc/clx_options.txt" "$DEST/clx_options.txt"
+    [ -f "$DEST/clx_mouse_options.txt" ] || cp "$REPO/pc/clx_mouse_options.txt" "$DEST/clx_mouse_options.txt"
     step "Linux output: $DEST"
     ls -l "$DEST"
     echo "Run: $DEST/clx.sh /path/to/unpacked/disc"
@@ -167,6 +168,7 @@ if has windows; then
     ldd "$DEST/clx.exe" | awk '/\/ucrt64\// {print $3}' | while read -r dll; do cp -n "$dll" "$DEST/"; done
     cp "$REPO/pc/clx.ps1" "$REPO/pc/clx.bat" "$DEST/"
     [ -f "$DEST/clx_options.txt" ] || cp "$REPO/pc/clx_options.txt" "$DEST/clx_options.txt"
+    [ -f "$DEST/clx_mouse_options.txt" ] || cp "$REPO/pc/clx_mouse_options.txt" "$DEST/clx_mouse_options.txt"
     step "Windows output: $DEST"
     ls -l "$DEST"
     echo "Run: $DEST/clx.bat C:\\path\\to\\unpacked\\disc"

@@ -65,6 +65,8 @@ The menu saves its values here. You can also edit the file with a text editor. O
 | `aniso` | `1`, `2`, `4`, `8`, `16` | Anisotropic filtering (Vulkan build). |
 | `fxaa` | `0`, `1` | FXAA (Vulkan build). |
 | `button_glyphs` | `switch`, `xbox`, `ps` | Button icons in the game (default: Switch on the Switch, Xbox on a PC). |
+| `fullscreen` | `borderless`, `window` | PC: borderless fullscreen. Also toggled with Alt+Enter or F11. |
+| `mouse` | `0`, `1` | PC: native mouse camera (default on). F8 releases/captures it. |
 | `key_<control>` | a key name | PC keyboard binding. See below. |
 | `pad_<control>` | a pad input | PC gamepad binding. See below. |
 
@@ -153,4 +155,33 @@ half: `+` or `-` and the axis name). Controls: `up down left right start
 lthumb rthumb a b x y black white lt rt`; Back stays the menu button. The
 menu's Remap lines write these lines; Reset controls removes them.
 
-Not available yet: mouse look, key rebinding inside the menu, a window-size setting.
+### PC mouse camera and fullscreen
+
+The PC build reads relative mouse motion and feeds it through the game's own
+right-stick input, so the camera follows the mouse with the game's normal
+camera logic. It uses the free camera, so the view stays where you point it.
+
+| Input | Action |
+|---|---|
+| Mouse | camera |
+| F8 | release / capture the mouse |
+| Esc | settings menu (the mouse is released while it is open) |
+| Alt+Enter, F11 | borderless fullscreen on / off |
+
+The mouse is captured only while the game has focus and the in-game camera is
+active, so the title screen and menus use a normal pointer.
+
+Settings live in `clx_mouse_options.txt` next to the executable:
+
+| Key | Meaning |
+|---|---|
+| `sensitivity` | degrees of rotation per mouse pixel (default 0.06) |
+| `sensitivity_y` | the same vertically (0 or absent: use `sensitivity`) |
+| `invert_x` | `1` reverses left/right |
+| `invert_y` | `1` = mouse up looks up (the shipped default); `0` = inverted |
+
+Start the Windows build with `clx.bat` (`clx.sh` on Linux). Mouse and borderless
+fullscreen are enabled from `clx_options.txt` with `mouse=1` and
+`fullscreen=borderless`; both are in the shipped PC options file.
+
+Not available yet: key rebinding inside the menu, a window-size setting.
