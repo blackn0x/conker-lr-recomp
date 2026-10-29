@@ -823,6 +823,41 @@ void sub_00355430(void)
     sub_00355430_gen();
 }
 
+/* ── Nearest-node search: keep a failed result inside its array ────────────
+ *
+ * 0x00354610 (base, query; count in ebx) picks the node nearest a query
+ * transform, returning base + best*32. When no entry is closer than FLT_MAX
+ * (best stays -1) it returns base - 32 and executes `mov dword ptr [0], 1`
+ * (the title's own debug break).
+ *
+ * The earth worm's bone palette holds a transform whose x/y/z are NaN
+ * (0xFFC00000, w = 212.0). Every distance is then NaN, best stays -1, and the
+ * caller at 0x00355C40 walks out of the array: node 0x01D7EA30 ->
+ * 0x01D7EA10 -> 0x3F00 -> 0x3EE0 -> 0xFFFFFFE0, which faults (or, with a
+ * RAM mirror, loops forever). The same crash reproduces with the official
+ * Windows and Linux builds.
+ *
+ * Treat the failed search as "use the first entry": it is inside the array,
+ * its loop counters are valid, and the walk terminates normally. Restore
+ * address 0 as well -- the generated assert overwrites the fake TIB/SEH head
+ * that lives there.
+ */
+extern void sub_00354610_gen(void);
+
+void sub_00354610(void)
+{
+    uint32_t base = MEM32(esp + 4);
+    uint32_t count = ebx;
+    uint32_t zero = MEM32(0);
+
+    sub_00354610_gen();
+    if (eax != base - 0x20)
+        return;                         /* an entry was found */
+    MEM32(0) = zero;
+    if (count && base >= 0x00010000u && base < 0x04000000u)
+        eax = base;
+}
+
 /* ── Debug probe: failed async reads (CLX_IO_PROBE=1) ─────────
  *
  * 0x002AA990 (stdcall, 1 arg) walks the title's list of pending reads:
