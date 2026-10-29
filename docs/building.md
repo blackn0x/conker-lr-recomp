@@ -52,7 +52,7 @@ A second run re-uses the lifted code and the build folders (in `out/work/`), so 
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `VARIANTS` | `vulkan gl` | A list: `vulkan`, `gl` (Switch), `linux`, `windows` |
+| `VARIANTS` | `vulkan gl` | A list: `vulkan`, `gl` (Switch), `linux`, `windows`, `android` ([Android](../android/README.md)) |
 | `REGEN` | `0` | `1`: lift again |
 | `JOBS` | by free memory | Compile jobs. Each needs about 1.5 GB of RAM. |
 | `OUT` | `<repo>/out` | Output folder |

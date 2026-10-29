@@ -10,6 +10,7 @@
  * looked for:
  *   Windows/Linux: $NFSU2_GAME_DIR, else ./game
  *   Switch:        sdmc:/switch/clx/game
+ *   Android:       /sdcard/ConkerLR/game (src/android.c)
  */
 
 #ifdef _WIN32
@@ -74,6 +75,9 @@ extern void xbox_path_init(const char *game_dir, const char *save_dir);
 #if defined(__SWITCH__)
 #  define NFSU2_DEFAULT_GAME_DIR "sdmc:/switch/clx/game"
 #  define NFSU2_DEFAULT_SAVE_DIR "sdmc:/switch/clx/save"
+#elif defined(__ANDROID__)
+#  define NFSU2_DEFAULT_GAME_DIR "/storage/emulated/0/ConkerLR/game"
+#  define NFSU2_DEFAULT_SAVE_DIR "/storage/emulated/0/ConkerLR/save"
 #else
 #  define NFSU2_DEFAULT_GAME_DIR "game"
 #  define NFSU2_DEFAULT_SAVE_DIR NULL
@@ -158,6 +162,86 @@ static void install_crash_reporter(void)
 #elif defined(__SWITCH__)
 /* The CPU exception handler is in switch_nx.c; it calls print_guest_state. */
 static void install_crash_reporter(void) {}
+#elif defined(__ANDROID__)
+/* Bionic has execinfo only from API 33: the unwinder and dladdr instead.
+ * Each frame is printed as library+offset, which addr2line (or
+ * llvm-symbolizer) turns into a function with the unstripped libmain.so
+ * that android/build.sh keeps in out/android/symbols/. */
+#include <dlfcn.h>
+#include <ucontext.h>
+#include <unwind.h>
+
+typedef struct { void **pc; int n, max; } UnwindState;
+
+static _Unwind_Reason_Code unwind_frame(struct _Unwind_Context *ctx, void *arg)
+{
+    UnwindState *st = (UnwindState *)arg;
+    uintptr_t pc = _Unwind_GetIP(ctx);
+    if (pc && st->n < st->max)
+        st->pc[st->n++] = (void *)pc;
+    return st->n < st->max ? _URC_NO_REASON : _URC_END_OF_STACK;
+}
+
+static void print_host_frame(const char *what, void *pc)
+{
+    Dl_info di;
+    if (dladdr(pc, &di) && di.dli_fname) {
+        const char *lib = strrchr(di.dli_fname, '/');
+        fprintf(stderr, "    %-4s %p  %s+0x%lx", what, pc, lib ? lib + 1 : di.dli_fname,
+                (unsigned long)((uintptr_t)pc - (uintptr_t)di.dli_fbase));
+        if (di.dli_sname)
+            fprintf(stderr, "  (%s+0x%lx)", di.dli_sname,
+                    (unsigned long)((uintptr_t)pc - (uintptr_t)di.dli_saddr));
+        fprintf(stderr, "\n");
+    } else {
+        fprintf(stderr, "    %-4s %p\n", what, pc);
+    }
+}
+
+static void crash_signal(int sig, siginfo_t *si, void *uc)
+{
+    static const char *const names[] = { [SIGSEGV] = "SIGSEGV", [SIGBUS] = "SIGBUS",
+        [SIGILL] = "SIGILL", [SIGFPE] = "SIGFPE", [SIGABRT] = "SIGABRT" };
+    const char *const name = sig < (int)(sizeof names / sizeof *names) && names[sig]
+                           ? names[sig] : "signal";
+    extern const char *android_log_dir(void);
+    void *frames[48];
+    UnwindState st = { frames, 0, 48 };
+    int i;
+
+    fprintf(stderr, "\n[CRASH] %s (%d, code %d), fault addr %p (guest VA 0x%08X), thread %d\n",
+            name, sig, si->si_code, si->si_addr,
+            (uint32_t)((uintptr_t)si->si_addr - (uintptr_t)g_xbox_mem_offset), gettid());
+#if defined(__aarch64__)
+    {
+        const mcontext_t *mc = &((const ucontext_t *)uc)->uc_mcontext;
+        fprintf(stderr, "  host: pc=%llx lr=%llx sp=%llx\n", (unsigned long long)mc->pc,
+                (unsigned long long)mc->regs[30], (unsigned long long)mc->sp);
+        for (i = 0; i < 30; i += 3)
+            fprintf(stderr, "        x%-2d=%016llx x%-2d=%016llx x%-2d=%016llx\n",
+                    i, (unsigned long long)mc->regs[i], i + 1, (unsigned long long)mc->regs[i + 1],
+                    i + 2, (unsigned long long)mc->regs[i + 2]);
+        fprintf(stderr, "  host frames:\n");
+        print_host_frame("pc", (void *)(uintptr_t)mc->pc);
+        print_host_frame("lr", (void *)(uintptr_t)mc->regs[30]);
+    }
+#else
+    (void)uc;
+#endif
+    print_guest_state();
+    /* The host frames name the lifted function (sub_XXXXXXXX) that
+     * faulted -- the guest stack alone does not on a worker thread. */
+    _Unwind_Backtrace(unwind_frame, &st);
+    fprintf(stderr, "  host backtrace:\n");
+    for (i = 0; i < st.n; i++) {
+        char what[8];
+        snprintf(what, sizeof what, "#%02d", i);
+        print_host_frame(what, frames[i]);
+    }
+    fprintf(stderr, "[CRASH] report ends; the log is in %s\n", android_log_dir());
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
 #else
 #include <execinfo.h>
 
@@ -180,6 +264,9 @@ static void crash_signal(int sig, siginfo_t *si, void *uc)
     signal(sig, SIG_DFL);
     raise(sig);
 }
+#endif
+
+#if !defined(_WIN32) && !defined(__SWITCH__)
 
 static void install_crash_reporter(void)
 {
@@ -199,6 +286,9 @@ static void install_crash_reporter(void)
     sigaction(SIGBUS, &sa, NULL);
     sigaction(SIGILL, &sa, NULL);
     sigaction(SIGFPE, &sa, NULL);
+#if defined(__ANDROID__)
+    sigaction(SIGABRT, &sa, NULL);      /* abort(): bionic's own checks */
+#endif
 }
 #endif
 
@@ -237,6 +327,11 @@ static void fatal(const char *msg)
     MessageBoxA(NULL, msg, "Conker: Live & Reloaded recomp", MB_ICONERROR);
 #elif defined(__SWITCH__)
     switch_error_dialog(msg, NULL);
+#elif defined(__ANDROID__)
+    extern const char *android_log_dir(void);
+    char text[1024];
+    snprintf(text, sizeof text, "%s\n\nLog: %s/clx_log.txt", msg, android_log_dir());
+    SDL_ShowSimpleMessageBox(0x10, "Conker: Live & Reloaded recomp", text, NULL);
 #else
     SDL_ShowSimpleMessageBox(0x10, "Conker: Live & Reloaded recomp", msg, NULL);
 #endif
@@ -300,6 +395,39 @@ int main(int argc, char **argv)
         fprintf(stderr, "[FATAL] cannot start the game thread\n");
     switch_shutdown();
     return rc;
+}
+#elif defined(__ANDROID__)
+#include <pthread.h>
+void android_boot(void);   /* android.c: the log in Downloads, folders, clx_env.txt */
+
+/* SDL's Java thread has a small stack for recompiled code; the game gets a
+ * thread with one like a desktop main thread's, as on the Switch. */
+static void *game_thread(void *arg)
+{
+    *(int *)arg = game_main();
+    return NULL;
+}
+
+/* SDLActivity (in the ":game" process) loads libmain.so and calls this. */
+__attribute__((visibility("default"))) int SDL_main(int argc, char **argv)
+{
+    pthread_attr_t attr;
+    pthread_t th;
+    int rc = 1;
+
+    (void)argc;
+    (void)argv;
+    android_boot();
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 16u * 1024 * 1024);
+    if (pthread_create(&th, &attr, game_thread, &rc) == 0)
+        pthread_join(th, NULL);
+    else
+        fprintf(stderr, "[FATAL] cannot start the game thread\n");
+    printf("[android] game ended (%d)\n", rc);
+    /* The runtime's state (the guest's address space, its threads) cannot
+     * start twice in one process: end it, the launcher's process stays. */
+    exit(rc);
 }
 #else
 int main(int argc, char **argv)
@@ -380,12 +508,14 @@ static int game_main(void)
      * the same with the flag on or off (Linux frames, 2026-10-21). The
      * toolkit's default 16:9 stretched the 4:3 picture by 4/3. 4:3 with side
      * bars is right; RECOMP_WIDESCREEN=1 in clx_env.txt stretches again.
-     * CLX_ASPECT=16:9 (aspect=16:9 in clx_options.txt) is a real 16:9: the
-     * game's projection is widened (Hor+, recomp_manual.c sub_003FB030) and
-     * presented at 16:9 with square pixels. */
+     * CLX_ASPECT=16:9 or 21:9 (aspect= in clx_options.txt) is a real wide
+     * picture: the game's projection is widened (Hor+, recomp_manual.c
+     * sub_003FB030) and presented at that aspect with square pixels. */
     {
-        const char *asp = getenv("CLX_ASPECT");
-        setenv("RECOMP_WIDESCREEN", asp && strcmp(asp, "16:9") == 0 ? "1" : "0", 0);
+        extern volatile float xbox_wide_ratio;      /* kernel_xbox.c */
+        setenv("RECOMP_WIDESCREEN", g_clx.aspect ? "1" : "0", 0);
+        if (g_clx.aspect)
+            xbox_wide_ratio = clx_aspect_ratio(g_clx.aspect);
     }
     /* CLX_SKIP_INTRO=1 (Switch default): the boot movie, the Microsoft Game
      * Studios logo and the multiplayer montage in BootIntro.xmv, is swapped

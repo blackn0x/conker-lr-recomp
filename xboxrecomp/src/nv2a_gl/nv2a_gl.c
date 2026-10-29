@@ -2584,9 +2584,10 @@ static void gl_flip(void)
     glClear(GL_COLOR_BUFFER_BIT);
     {
         float lw = (float)s->w / (float)s->aa_sx, lh = (float)s->h / (float)s->aa_sy;
-        /* A widescreen title renders 640x480 anamorphic: show it at 16:9. */
+        /* A widescreen title renders 640x480 anamorphic: show it at 16:9
+         * (or the port's xbox_wide_ratio). */
         if (xbox_video_widescreen() && lw < lh * 1.5f)
-            lw = lh * 16.0f / 9.0f;
+            lw = lh * xbox_wide_ratio;
         float scale = (float)ww / lw < (float)wh / lh ? (float)ww / lw : (float)wh / lh;
         int dw = (int)(lw * scale), dh = (int)(lh * scale);
         int dx = (ww - dw) / 2, dy = (wh - dh) / 2;

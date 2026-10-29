@@ -1,6 +1,6 @@
 /* clx_options.txt: the user's settings, one KEY=VALUE per line.
  *
- *   aspect=4:3 | 16:9          Hor+ 16:9 (wider view; HUD stretched)
+ *   aspect=4:3 | 16:9 | 21:9   Hor+ 16:9 or 21:9 (wider view; HUD stretched)
  *   fps=30 | 60                60 Hz (experimental; from the next start)
  *   camera=classic | free      free: no automatic swing behind Conker
  *   camera_invert_y=0 | 1      flip the right stick's vertical axis (camera_invert=1 too)
@@ -88,6 +88,23 @@ static int on(const char *v)
     return v && (*v == '1' || !strncmp(v, "on", 2));
 }
 
+static const char *const k_aspects[] = { "4:3", "16:9", "21:9" };
+
+static int aspect_parse(const char *v)
+{
+    return !strcmp(v, "21:9") ? 2 : !strcmp(v, "16:9") ? 1 : 0;
+}
+
+const char *clx_aspect_name(int aspect)
+{
+    return k_aspects[aspect >= 0 && aspect <= 2 ? aspect : 0];
+}
+
+float clx_aspect_ratio(int aspect)
+{
+    return aspect == 2 ? 21.0f / 9.0f : aspect == 1 ? 16.0f / 9.0f : 4.0f / 3.0f;
+}
+
 void clx_options_load(void)
 {
     FILE *f = fopen(clx_options_path(), "r");
@@ -102,7 +119,7 @@ void clx_options_load(void)
             *v++ = 0;
             if ((nl = strpbrk(v, "\r\n")))
                 *nl = 0;
-            if (!strcmp(line, "aspect")) g_clx.aspect169 = !strcmp(v, "16:9");
+            if (!strcmp(line, "aspect")) g_clx.aspect = aspect_parse(v);
             else if (!strcmp(line, "fps")) g_clx.fps60 = atoi(v) == 60;
             else if (!strcmp(line, "camera")) g_clx.cam_free = !strcmp(v, "free");
             else if (!strcmp(line, "camera_invert_y") || !strcmp(line, "camera_invert"))
@@ -127,7 +144,7 @@ void clx_options_load(void)
         fclose(f);
     }
     /* The environment (clx_env.txt) wins, as before the menu existed. */
-    if ((e = getenv("CLX_ASPECT"))) g_clx.aspect169 = !strcmp(e, "16:9");
+    if ((e = getenv("CLX_ASPECT"))) g_clx.aspect = aspect_parse(e);
     if ((e = getenv("CLX_FPS"))) g_clx.fps60 = atoi(e) == 60;
     if ((e = getenv("CLX_CAM_FREE"))) g_clx.cam_free = *e == '1';
     if ((e = getenv("CLX_CAM_INVERT_Y"))) g_clx.cam_invert = *e == '1';
@@ -140,10 +157,10 @@ void clx_options_load(void)
     if (g_clx.aniso < 1) g_clx.aniso = 1;
     if (g_clx.aniso > 16) g_clx.aniso = 16;
     /* What the boot code reads (main.c, the renderers). */
-    setenv("CLX_ASPECT", g_clx.aspect169 ? "16:9" : "4:3", 0);
+    setenv("CLX_ASPECT", clx_aspect_name(g_clx.aspect), 0);
     printf("[options] %s: aspect %s, fps %d, camera %s%s, subtitles %s, FPS counter %s, volume %d,"
            " scale handheld %d%% docked %d%%, aniso %dx, FXAA %s\n", clx_options_path(),
-           g_clx.aspect169 ? "16:9" : "4:3", g_clx.fps60 ? 60 : 30,
+           clx_aspect_name(g_clx.aspect), g_clx.fps60 ? 60 : 30,
            g_clx.cam_free ? "free" : "classic", g_clx.cam_invert ? " (inverted)" : "",
            g_clx.bubble_wide ? "wide" : "classic", g_clx.fps_osd ? "on" : "off", g_clx.volume,
            g_clx.scale_handheld, g_clx.scale_docked, g_clx.aniso, g_clx.fxaa ? "on" : "off");
@@ -190,7 +207,7 @@ int clx_options_save(void)
     }
     fprintf(out, "aspect=%s\nfps=%d\ncamera=%s\ncamera_invert_y=%d\nbubble=%s\nfps_counter=%d\n"
             "volume=%d\nscale_handheld=%d\nscale_docked=%d\naniso=%d\nfxaa=%d\nbutton_glyphs=%s\n",
-            g_clx.aspect169 ? "16:9" : "4:3", g_clx.fps60 ? 60 : 30,
+            clx_aspect_name(g_clx.aspect), g_clx.fps60 ? 60 : 30,
             g_clx.cam_free ? "free" : "classic", g_clx.cam_invert ? 1 : 0,
             g_clx.bubble_wide ? "wide" : "classic", g_clx.fps_osd ? 1 : 0, g_clx.volume,
             g_clx.scale_handheld, g_clx.scale_docked, g_clx.aniso, g_clx.fxaa ? 1 : 0,

@@ -10234,17 +10234,49 @@ static int kernel_call_keeps_gil(int slot)
         || ord == 160 || ord == 161;          /* KeRaiseIrqlTo*, KfRaise/LowerIrql */
 }
 
+/* The calls that can block: a raised thread lends the dispatch lock out
+ * across them (xbox_dispatch_lend). RtlEnterCriticalSection lends it itself,
+ * only when it actually has to wait (kernel_rtl.c): XACT enters one at
+ * DISPATCH all the time, and lending on every uncontended call opened a
+ * window for DPCs inside its raised section. */
+static int kernel_call_blocks(int slot)
+{
+    ULONG ord;
+    if (slot < 0 || slot >= XBOX_KERNEL_THUNK_TABLE_SIZE)
+        return 0;
+    ord = g_slot_ordinals[slot];
+    return ord == 99                                   /* KeDelayExecutionThread */
+        || ord == 158 || ord == 159                    /* KeWaitFor{Multiple,Single}Object(s) */
+        || ord == 233 || ord == 234 || ord == 235;     /* NtWaitFor* */
+}
+
+int  xbox_dispatch_lend(void);                       /* kernel_hal.c */
+void xbox_dispatch_reclaim(int lent);
+
 static void kernel_thunk_dispatch(void)
 {
+    int lent = 0;
     if (kernel_call_keeps_gil(g_kernel_dispatch_slot)) {
         kernel_thunk_dispatch_body();
         return;
     }
     int gil = xbox_gil_suspend();                /* the kernel is not guest code */
     pending_start_flush(GetCurrentThreadId());   /* threads this one created */
+    if (kernel_call_blocks(g_kernel_dispatch_slot) && (lent = xbox_dispatch_lend())) {
+        static volatile LONG told[256];               /* once per ordinal */
+        ULONG ord = g_slot_ordinals[g_kernel_dispatch_slot];
+        if (ord < 256 && InterlockedIncrement(&told[ord]) == 1) {
+            fprintf(stderr, "  [IRQL] ordinal %u waits while raised (guest ret 0x%08X):"
+                    " dispatch lock lent out\n",
+                    (unsigned)g_slot_ordinals[g_kernel_dispatch_slot],
+                    g_esp ? BRIDGE_MEM32(g_esp) : 0);
+            fflush(stderr);
+        }
+    }
     xbox_kernel_busy(1);
     kernel_thunk_dispatch_body();
     xbox_kernel_busy(-1);
+    xbox_dispatch_reclaim(lent);
     xbox_gil_resume(gil);
 }
 

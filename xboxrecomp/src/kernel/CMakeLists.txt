@@ -53,9 +53,9 @@ if(WIN32)
 else()
     # Linux: platform layer (POSIX host primitives) + OpenSSL for crypto.
     # The crypto (kernel_crypto.c) is portable C; nothing calls OpenSSL. It
-    # stays linked on desktop for compatibility and is skipped on the Switch,
-    # which has no OpenSSL package.
-    if(NINTENDO_SWITCH)
+    # stays linked on desktop for compatibility and is skipped on the Switch
+    # and Android, which have no OpenSSL package.
+    if(NINTENDO_SWITCH OR ANDROID)
         target_link_libraries(xbox_kernel PUBLIC platform)
     else()
         find_package(OpenSSL REQUIRED)

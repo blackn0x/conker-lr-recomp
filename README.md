@@ -31,6 +31,7 @@ Multiplayer and Xbox Live do not work.
 | Nintendo Switch (Atmosphère) | Linux, WSL2 or Docker | Vulkan (NVK) or OpenGL | on a console; the OpenGL app also in the Eden emulator |
 | Linux x86-64 | Linux | OpenGL 3.3 | builds and renders the game (software GL, frame dumps) |
 | Windows 10/11 x64 | MSYS2 | OpenGL 3.3 | plays on one PC (Windows 10, NVIDIA): keyboard and menu tested |
+| Android 11+ arm64 | Linux | Vulkan 1.3 | experimental: builds, not tested on a phone yet ([android/README.md](android/README.md)) |
 
 ## What you need
 

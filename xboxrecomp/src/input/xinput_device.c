@@ -461,6 +461,27 @@ int xbox_pad_poll_new(char *out, int n)
     return 1;
 }
 
+#if defined(__ANDROID__)
+/* The on-screen controls (src/android.c), on top of pad 1 like the keyboard. */
+void android_touch_apply(unsigned short *wButtons, unsigned char analog[8], short thumbs[4]);
+
+static void touch_apply(XBOX_INPUT_STATE *s)
+{
+    short th[4] = { s->Gamepad.sThumbLX, s->Gamepad.sThumbLY,
+                    s->Gamepad.sThumbRX, s->Gamepad.sThumbRY };
+    unsigned short w = s->Gamepad.wButtons;
+
+    android_touch_apply(&w, s->Gamepad.bAnalogButtons, th);
+    s->Gamepad.wButtons = w;
+    s->Gamepad.sThumbLX = th[0];
+    s->Gamepad.sThumbLY = th[1];
+    s->Gamepad.sThumbRX = th[2];
+    s->Gamepad.sThumbRY = th[3];
+}
+#else
+#define touch_apply(s) ((void)0)
+#endif
+
 DWORD xbox_InputGetState(DWORD dwPort, XBOX_INPUT_STATE *pState)
 {
     if (dwPort >= XBOX_MAX_CONTROLLERS || !pState)
@@ -513,6 +534,7 @@ DWORD xbox_InputGetState(DWORD dwPort, XBOX_INPUT_STATE *pState)
             const Uint8 *ks = SDL_GetKeyboardState(&n);
             if (ks)
                 xbox_keys_apply(ks, n, pState);
+            touch_apply(pState);
             g_controller_connected[0] = TRUE;
             pState->dwPacketNumber = ++g_packet[0];
             return ERROR_SUCCESS;
@@ -557,6 +579,7 @@ DWORD xbox_InputGetState(DWORD dwPort, XBOX_INPUT_STATE *pState)
         const Uint8 *ks = SDL_GetKeyboardState(&n);
         if (ks)
             xbox_keys_apply(ks, n, pState);
+        touch_apply(pState);
     }
 #endif
 
@@ -575,13 +598,26 @@ DWORD xbox_InputSetState(DWORD dwPort, const XBOX_VIBRATION *pVibration)
     return ERROR_SUCCESS;
 #else
     SDL_GameController *c = g_pads[dwPort];
-    if (!c) return ERROR_DEVICE_NOT_CONNECTED;
 
-    /* SDL rumble needs a duration; refresh for ~1s on each call (the game
-     * polls vibration continuously). */
-    SDL_GameControllerRumble(c, pVibration->wLeftMotorSpeed,
-                             pVibration->wRightMotorSpeed, 1000);
-    return ERROR_SUCCESS;
+    /* SDL rumble needs a duration. The USB pad model passes changes only
+     * (usb_gamepad_output), so a rumble lasts until the next call -- SDL's
+     * longest; zero speeds stop it. This was 1 s, which cut every longer
+     * rumble short. */
+    if (c && SDL_GameControllerRumble(c, pVibration->wLeftMotorSpeed,
+                                      pVibration->wRightMotorSpeed, 0xFFFF) == 0)
+        return ERROR_SUCCESS;
+#if defined(__ANDROID__)
+    /* SDL has no rumble for Android's own joysticks; Rumble.java does it,
+     * and vibrates the phone for pad 1 on the touch controls. */
+    {
+        extern void android_rumble(int port, unsigned low, unsigned high);
+        android_rumble((int)dwPort, pVibration->wLeftMotorSpeed,
+                       pVibration->wRightMotorSpeed);
+        return ERROR_SUCCESS;
+    }
+#else
+    return c ? ERROR_SUCCESS : ERROR_DEVICE_NOT_CONNECTED;
+#endif
 #endif
 }
 

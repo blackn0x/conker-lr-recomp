@@ -130,6 +130,10 @@ NTSTATUS __stdcall xbox_XeUnloadSection(PXBE_SECTION_HEADER Section)
 /* -1 until first read (RECOMP_WIDESCREEN); a port's menu may set 0/1 later. */
 volatile int xbox_widescreen = -1;
 
+/* Width / height a widescreen picture is presented at (16:9 unless a port
+ * sets another, e.g. Conker's 21:9); the renderers read it per frame. */
+volatile float xbox_wide_ratio = 16.0f / 9.0f;
+
 int xbox_video_widescreen(void)
 {
     if (xbox_widescreen < 0) {

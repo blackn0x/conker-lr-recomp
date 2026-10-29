@@ -21,7 +21,7 @@ While the menu is open, the game gets no input. It keeps running: a cutscene goe
 | Line | Values | Takes effect |
 |---|---|---|
 | Controller (PC) | pad 1's name, or NONE ("plug in or pair a pad"); left/right make the next pad pad 1 | at once |
-| Aspect | 4:3, 16:9 (Hor+: a wider view; HUD stretched) | at once |
+| Aspect | 4:3, 16:9, 21:9 (Hor+: a wider view; HUD stretched) | at once |
 | Frame rate | 30, 60 (60 is experimental) | after a restart |
 | Camera | classic, free (no swing back behind Conker) | at once |
 | Invert camera up/down | off, on | at once |
@@ -52,7 +52,7 @@ The menu saves its values here. You can also edit the file with a text editor. O
 
 | Key | Values | Meaning |
 |---|---|---|
-| `aspect` | `4:3`, `16:9` | Picture shape. 16:9 is a wider view, not a stretch. |
+| `aspect` | `4:3`, `16:9`, `21:9` | Picture shape. 16:9 and 21:9 are a wider view, not a stretch. |
 | `fps` | `30`, `60` | Frame rate. 60 is experimental. Needs a restart. |
 | `camera` | `classic`, `free` | `free`: no automatic swing behind Conker. |
 | `camera_invert_y` | `0`, `1` | Flip the right stick up/down. `camera_invert` is the same key. |

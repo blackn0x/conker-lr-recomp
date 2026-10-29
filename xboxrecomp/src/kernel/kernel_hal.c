@@ -11,11 +11,16 @@
  *   - Stubbed (PCI access, SMC, interrupts)
  */
 
+#if !defined(_WIN32) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE /* Dl_info, dladdr */
+#endif
 #include "kernel.h"
 #include <stdio.h>
 #include <stdlib.h>
 #if defined(_WIN32)
 #include <intrin.h>
+#else
+#include <dlfcn.h>
 #endif
 #if defined(_MSC_VER) && !defined(__clang__)
 #pragma intrinsic(_ReturnAddress)
@@ -128,9 +133,23 @@ void xbox_IrqlDumpHolders(void)
             xbox_IrqlRaisedCount(), xbox_IrqlTransitions());
     for (i = 0; i < IRQL_HOLDERS; i++) {
         LONG t = InterlockedCompareExchange(&s_holders[i].tid, 0, 0);
-        if (t)
+        if (t) {
+#if !defined(_WIN32)
+            /* Module-relative, so a stripped build's report can be read
+             * against the symbols (ASLR moves the module every run). */
+            Dl_info di;
+            if (dladdr(s_holders[i].ra, &di) && di.dli_fname) {
+                const char *m = strrchr(di.dli_fname, '/');
+                fprintf(stderr, "  [IRQLHOLD]   tid %lu raised from %s+0x%lx (%s)\n",
+                        (unsigned long)t, m ? m + 1 : di.dli_fname,
+                        (unsigned long)((uintptr_t)s_holders[i].ra - (uintptr_t)di.dli_fbase),
+                        di.dli_sname ? di.dli_sname : "?");
+                continue;
+            }
+#endif
             fprintf(stderr, "  [IRQLHOLD]   tid %lu raised from host %p\n",
                     (unsigned long)t, s_holders[i].ra);
+        }
     }
     fflush(stderr);
 }
@@ -231,6 +250,39 @@ static void irql_transition(KIRQL from, KIRQL to)
         t_dispatch_held = 0;
         LeaveCriticalSection(&g_dispatch_lock);
     }
+}
+
+/* A raised thread about to block in a kernel wait gives the dispatch lock
+ * up until the wait returns; returns whether it held it.
+ *
+ * Waiting while raised is illegal on the Xbox, but titles do it, and there
+ * it costs nothing: the thread is switched out and the GPU's ISR runs. Here
+ * the ISR runs on the timer thread, which needs this lock, so the waiter
+ * held off the very interrupt it was waiting for -- Conker froze on its
+ * autosave, a pushbuffer NOP trap pending forever behind a raised thread.
+ * IRQL stays where it is: only the lock is lent out. */
+int xbox_dispatch_lend(void)
+{
+    if (!t_dispatch_held)
+        return 0;
+    t_dispatch_held = 0;
+    LeaveCriticalSection(&g_dispatch_lock);
+    return 1;
+}
+
+/* Take it back after the wait. A DPC holding this lock may want the guest
+ * lock, so a contended take lets go of that one first, as irql_transition
+ * does (a no-op when the caller does not hold it). */
+void xbox_dispatch_reclaim(int lent)
+{
+    if (!lent)
+        return;
+    if (!TryEnterCriticalSection(&g_dispatch_lock)) {
+        int gil = xbox_gil_suspend();
+        EnterCriticalSection(&g_dispatch_lock);
+        xbox_gil_resume(gil);
+    }
+    t_dispatch_held = 1;
 }
 
 KIRQL xbox_CurrentIrql(void) { return g_current_irql; }

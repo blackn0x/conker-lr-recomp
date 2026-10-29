@@ -128,6 +128,9 @@ static VkSurfaceKHR   s_surface;
 static VkSwapchainKHR s_swapchain;
 static VkFormat       s_sc_format;
 static VkExtent2D     s_sc_extent;
+/* The swapchain is not in the panel's rotation, by choice (create_swapchain):
+ * every present then reports SUBOPTIMAL, which is not a reason to rebuild. */
+static int            s_sc_unrotated;
 static uint32_t       s_sc_count;
 static VkImage        s_sc_images[8];
 static VkImageView    s_sc_views[8];
@@ -378,14 +381,16 @@ typedef struct {
  * nothing else does. Capped per surface by the device's image limits.
  * Horizontal: s_scale times s_xratio, 1 unless RECOMP_GL_SCALE_X sets the
  * horizontal scale outright (a game option's rescale keeps the ratio).
- * s_square: widescreen shows the title's 640x480 at 16:9, so surfaces
- * without horizontal AA get 4/3 more columns -- square pixels (races: 1.5x
+ * s_square: widescreen shows the title's 640x480 at 16:9 (xbox_wide_ratio;
+ * s_wide is the one the surfaces were sized for), so surfaces
+ * without horizontal AA get 4/3 more columns (21:9: 7/4) -- square pixels (races: 1.5x
  * -> 1280x720); surfaces with horizontal AA get 4/3 divided by it (the
  * front end's 1280x480, aa 2x1: 1280x720 at 1.5x, not 1920x720 -- the
  * title's horizontal supersampling is dropped).
  * RECOMP_VK_SQUARE=0 off; RECOMP_GL_SCALE_X overrides it. */
 static double   s_scale = 1.0, s_scale_x = 1.0, s_xratio = 1.0;
 static int      s_square, s_square_env;
+static float    s_wide = 16.0f / 9.0f;
 
 /* Picture options set at run time (NFSU2: Options -> Video), read by the
  * renderer: FXAA on/off (at every present), anisotropic level 1..16 (per
@@ -406,7 +411,7 @@ volatile int nv2a_vk_scale_pct;
  * by the device's image limits. */
 static void stored_size(uint32_t w, uint32_t h, uint32_t aa_sx, uint32_t *pw, uint32_t *ph)
 {
-    double kx = s_scale_x * (s_square ? 4.0 / 3.0 / (aa_sx > 1 ? aa_sx : 1) : 1.0), ky = s_scale;
+    double kx = s_scale_x * (s_square ? s_wide * 0.75 / (aa_sx > 1 ? aa_sx : 1) : 1.0), ky = s_scale;
     if (w * kx > (double)s_max_size)
         kx = (double)s_max_size / w;
     if (h * ky > (double)s_max_size)
@@ -2992,7 +2997,20 @@ static int create_swapchain(void)
     ci.imageArrayLayers = 1;
     ci.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     ci.preTransform = caps.currentTransform;
-    ci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    /* Android reports the panel's rotation (a phone held landscape is a
+     * portrait panel turned 90 degrees). The picture is drawn upright, so
+     * the compositor rotates it: identity. currentExtent is already the
+     * window's upright size -- swapping it is only for pre-rotated
+     * rendering (preTransform = currentTransform), and doing it here made a
+     * portrait swapchain the compositor squashed into the landscape window. */
+    if ((caps.currentTransform & (VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR |
+                                  VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR))
+            && (caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR))
+        ci.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+    s_sc_unrotated = ci.preTransform != caps.currentTransform;
+    /* Android surfaces often offer only INHERIT. */
+    ci.compositeAlpha = (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR)
+                      ? VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR : VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
     ci.presentMode = mode;
     ci.clipped = VK_TRUE;
     ci.oldSwapchain = s_swapchain;
@@ -3149,6 +3167,7 @@ static int ready(void)
         if (k > 0.0)
             s_square_env = 0;
         s_square = s_square_env && xbox_video_widescreen() && nv2a_vk_square;
+        s_wide = xbox_wide_ratio;
         if (k > 0.0)
             s_xratio = (k < 0.5 ? 0.5 : k > 4.0 * 4.0 / 3.0 ? 4.0 * 4.0 / 3.0 : k) / s_scale;
         s_scale_x = s_scale * s_xratio;
@@ -3239,6 +3258,23 @@ static int ready(void)
     dci.enabledExtensionCount = ndext;
     dci.ppEnabledExtensionNames = dext;
     (void)feds;
+    {
+        /* Name what is missing: on a phone this is the likely failure. */
+        VkExtensionProperties *ep;
+        uint32_t ne = 0, k, j;
+        if (VK_API_VERSION_MINOR(pp.apiVersion) < 3 && VK_API_VERSION_MAJOR(pp.apiVersion) == 1)
+            LOGE("the driver has Vulkan 1.%u; 1.3 is needed\n", VK_API_VERSION_MINOR(pp.apiVersion));
+        vkEnumerateDeviceExtensionProperties(s_pd, NULL, &ne, NULL);
+        ep = (VkExtensionProperties *)calloc(ne ? ne : 1, sizeof *ep);
+        if (ep && vkEnumerateDeviceExtensionProperties(s_pd, NULL, &ne, ep) == VK_SUCCESS)
+            for (k = 0; k < ndext; k++) {
+                for (j = 0; j < ne && strcmp(ep[j].extensionName, dext[k]); j++)
+                    ;
+                if (j == ne)
+                    LOGE("device extension %s missing\n", dext[k]);
+            }
+        free(ep);
+    }
     if (vkCreateDevice(s_pd, &dci, NULL, &s_dev) != VK_SUCCESS) {
         LOGE("vkCreateDevice failed (needs push descriptors, dynamic vertex input, Vulkan 1.3)\n");
         return 0;
@@ -5301,7 +5337,9 @@ static void present_result(VkResult r, uint32_t pw, uint32_t ph)
 {
     if (nv2a_host_frame_presented)
         nv2a_host_frame_presented(pw, ph);
-    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
+    /* Rebuilding on that SUBOPTIMAL waited for the GPU and made a new
+     * swapchain every frame: 20 fps on an Adreno 740 that does 60. */
+    if (r == VK_ERROR_OUT_OF_DATE_KHR || (r == VK_SUBOPTIMAL_KHR && !s_sc_unrotated)) {
         vkDeviceWaitIdle(s_dev);
         create_swapchain();
     }
@@ -5362,6 +5400,42 @@ static void present_image(uint32_t idx, uint32_t pw, uint32_t ph)
         present_result(vkQueuePresentKHR(s_queue, &pi), pw, ph);
     }
 }
+
+#if defined(__ANDROID__)
+/* Android takes the window's surface away while the app is in the
+ * background. The renderer, and the game behind it, waits until the app is
+ * back, then presents to the new surface (SDL has it by then: its event
+ * pump blocks while the activity is paused). */
+static void android_background(void)
+{
+    SDL_Event e;
+    uint32_t i;
+
+    fprintf(stderr, "  [VK] app in the background: rendering paused\n");
+    present_drain();
+    vkDeviceWaitIdle(s_dev);
+    while (SDL_WaitEvent(&e) && e.type != SDL_APP_DIDENTERFOREGROUND)
+        if (e.type == SDL_QUIT)
+            recomp_host_quit("app closed in the background");
+    for (i = 0; i < 8; i++)
+        if (s_sc_views[i]) {
+            vkDestroyImageView(s_dev, s_sc_views[i], NULL);
+            s_sc_views[i] = VK_NULL_HANDLE;
+        }
+    if (s_swapchain)
+        vkDestroySwapchainKHR(s_dev, s_swapchain, NULL);
+    s_swapchain = VK_NULL_HANDLE;
+    vkDestroySurfaceKHR(s_inst, s_surface, NULL);
+    s_surface = VK_NULL_HANDLE;
+    if (!SDL_Vulkan_CreateSurface(s_win, s_inst, &s_surface) || !create_swapchain()) {
+        LOGE("no surface after the app came back (%s); running headless\n", SDL_GetError());
+        s_headless = 1;
+        return;
+    }
+    fprintf(stderr, "  [VK] app back in the foreground: %ux%u\n",
+            s_sc_extent.width, s_sc_extent.height);
+}
+#endif
 
 static void vk_flip(void)
 {
@@ -5501,10 +5575,12 @@ static void vk_flip(void)
         int pct = nv2a_vk_scale_pct;
         double k = pct < 50 ? 0.0 : pct > 400 ? 4.0 : pct / 100.0;
         int sq = s_square_env && xbox_video_widescreen() && nv2a_vk_square;
+        float wide = xbox_wide_ratio;
         if (!(k > 0.0))
             k = s_scale;
-        if (k != s_scale || sq != s_square) {
+        if (k != s_scale || sq != s_square || (sq && wide != s_wide)) {
             s_square = sq;
+            s_wide = wide;
             rescale_surfaces(k);
         }
     }
@@ -5587,7 +5663,7 @@ static void vk_flip(void)
                 float lw = (float)s->w / (float)s->aa_sx, lh = (float)s->h / (float)s->aa_sy;
                 float ww = (float)s_sc_extent.width, wh = (float)s_sc_extent.height, scale;
                 if (xbox_video_widescreen() && lw < lh * 1.5f)
-                    lw = lh * 16.0f / 9.0f;
+                    lw = lh * xbox_wide_ratio;
                 scale = ww / lw < wh / lh ? ww / lw : wh / lh;
                 dw = (int)(lw * scale); dh = (int)(lh * scale);
                 dx = ((int)ww - dw) / 2; dy = ((int)wh - dh) / 2;
@@ -5701,10 +5777,15 @@ static void vk_flip(void)
 #if !defined(__SWITCH__)
     if (s_win) {
         SDL_Event e;
-        while (SDL_PollEvent(&e))       /* the window's close button, Alt+F4 */
+        while (SDL_PollEvent(&e)) {     /* the window's close button, Alt+F4 */
             if (e.type == SDL_QUIT
                 || (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_CLOSE))
                 recomp_host_quit("window closed");
+#if defined(__ANDROID__)
+            if (e.type == SDL_APP_WILLENTERBACKGROUND)
+                android_background();
+#endif
+        }
     }
 #endif
 }

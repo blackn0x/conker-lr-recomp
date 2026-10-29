@@ -26,6 +26,12 @@ if(NINTENDO_SWITCH)
     target_link_libraries(xbox_nv2a_vk PUBLIC
         "${NVK_SDK}/lib/libvulkan.a" expat zstd z nx
         "${NVK_SDK}/lib/libvulkan.a" expat zstd z nx stdc++ m)
+elseif(ANDROID)
+    # The NDK's Vulkan loader (libvulkan.so, API 24+) and SDL2 from
+    # android/build_deps.sh. glslang is built there without its optimizer;
+    # its SPIR-V output (glslang_program_SPIRV_*) is a library of its own.
+    find_package(SDL2 REQUIRED)
+    target_link_libraries(xbox_nv2a_vk PUBLIC glslang::SPIRV SDL2::SDL2 vulkan c++_static c++abi)
 else()
     find_package(Vulkan REQUIRED)
     find_package(PkgConfig REQUIRED)

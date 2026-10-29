@@ -12,7 +12,7 @@
 #endif
 
 typedef struct {
-    volatile int aspect169;      /* 1 = Hor+ 16:9 */
+    volatile int aspect;         /* 0 = 4:3, 1 = Hor+ 16:9, 2 = Hor+ 21:9 */
     volatile int fps60;          /* 1 = 60 Hz (applied at the next start) */
     volatile int cam_free;       /* 1 = no swing back behind Conker */
     volatile int cam_invert;     /* 1 = right stick's vertical axis flipped */
@@ -34,6 +34,9 @@ void clx_options_load(void);
 /* Writes the menu's keys back to clx_options.txt, keeping every other line. */
 int clx_options_save(void);
 const char *clx_options_path(void);
+/* The aspect setting: "4:3" / "16:9" / "21:9", and its width / height. */
+const char *clx_aspect_name(int aspect);
+float clx_aspect_ratio(int aspect);
 /* PC: bind "key_<control>" or "pad_<control>" (sdl_keys.h names) and keep
  * it for the next save; reset: default keys and pad buttons, none saved. */
 int clx_bind(const char *name, const char *value);

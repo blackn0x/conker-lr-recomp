@@ -910,7 +910,11 @@ void xbox_guest_pin(int interrupt)
         cpu_set_t set;
         CPU_ZERO(&set);
         CPU_SET(core, &set);
+#if defined(__ANDROID__)
+        sched_setaffinity(0, sizeof set, &set);   /* bionic: no pthread_setaffinity_np */
+#else
         pthread_setaffinity_np(pthread_self(), sizeof set, &set);
+#endif
         (void)interrupt;
     }
 #endif
@@ -1256,11 +1260,33 @@ DWORD SuspendThread(HANDLE h)
     return prev;
 }
 
+#if defined(__ANDROID__)
+/* Bionic has no pthread_cancel. A signal whose handler exits the thread
+ * does the same (asynchronous cancellation, as glibc's TerminateThread). */
+static void terminate_signal(int sig)
+{
+    (void)sig;
+    pthread_exit(NULL);
+}
+
+static void terminate_host_thread(pthread_t t)
+{
+    struct sigaction sa;
+
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = terminate_signal;
+    sigaction(SIGUSR2, &sa, NULL);
+    pthread_kill(t, SIGUSR2);
+}
+#else
+#define terminate_host_thread(t) pthread_cancel(t)
+#endif
+
 BOOL TerminateThread(HANDLE h, DWORD exitCode)
 {
     w32_object *o = obj_from(h);
     if (!o || o->kind != K_THREAD) return FALSE;
-    pthread_cancel(o->thread);
+    terminate_host_thread(o->thread);
     pthread_mutex_lock(&o->lock);
     o->exit_code = exitCode;
     o->exited    = 1;
@@ -2091,6 +2117,9 @@ VOID SecureZeroMemory(PVOID ptr, SIZE_T cnt)
 {
 #if defined(__APPLE__)
     memset_s(ptr, cnt, 0, cnt);
+#elif defined(__ANDROID__)
+    memset(ptr, 0, cnt);                     /* bionic: no explicit_bzero */
+    __asm__ __volatile__("" : : "r"(ptr) : "memory");
 #else
     explicit_bzero(ptr, cnt);
 #endif

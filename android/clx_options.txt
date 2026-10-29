@@ -1,0 +1,14 @@
+# Conker: Live & Reloaded (Android): options, one key=value per line.
+# The game reads this file and saves it from its settings menu (BACK / View / Select).
+# Full list: docs/settings-and-controls.md.
+
+# Render scale in percent of 640x480 (150 = 960x720). Lower it on a slow phone.
+scale_handheld=150
+aniso=16
+fxaa=1
+# 4:3 (default, side bars), 16:9 or 21:9 (true Hor+ widescreen; HUD and menus stretched)
+aspect=4:3
+# 30 (default) or 60 (experimental; from the next start)
+fps=30
+# FPS counter top-left
+#fps_counter=1

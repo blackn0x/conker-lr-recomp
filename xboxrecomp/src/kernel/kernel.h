@@ -1070,6 +1070,7 @@ NTSTATUS __stdcall xbox_ExSaveNonVolatileSetting(ULONG ValueIndex, ULONG Type, P
  * stretches it to 16:9. */
 int xbox_video_widescreen(void);
 extern volatile int xbox_widescreen;   /* -1 until first read; 0/1, settable at run time */
+extern volatile float xbox_wide_ratio; /* width / height of the widescreen picture (16/9) */
 
 /* Unknown ordinals - stub */
 VOID    __stdcall xbox_Unknown_8(void);

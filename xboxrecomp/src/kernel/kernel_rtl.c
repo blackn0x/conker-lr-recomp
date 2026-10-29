@@ -469,6 +469,9 @@ static void xbox_cs_clear_owner(CRITICAL_SECTION* cs)
     }
 }
 
+int  xbox_dispatch_lend(void);                       /* kernel_hal.c */
+void xbox_dispatch_reclaim(int lent);
+
 VOID __stdcall xbox_RtlEnterCriticalSection(PRTL_CRITICAL_SECTION CriticalSection)
 {
     CRITICAL_SECTION* cs = xbox_cs_shadow(CriticalSection);
@@ -509,7 +512,19 @@ VOID __stdcall xbox_RtlEnterCriticalSection(PRTL_CRITICAL_SECTION CriticalSectio
         xbox_guest_backtrace(10);
         fflush(stderr);
     }
-    EnterCriticalSection(cs);
+    {
+        /* A raised caller lends the dispatch lock while it waits, so the
+         * holder's ISRs and DPCs can run (kernel_hal.c). */
+        int lent = xbox_dispatch_lend();
+        static volatile LONG told;
+        if (lent && InterlockedIncrement(&told) == 1) {
+            fprintf(stderr, "  [IRQL] RtlEnterCriticalSection waits while raised:"
+                            " dispatch lock lent out\n");
+            fflush(stderr);
+        }
+        EnterCriticalSection(cs);
+        xbox_dispatch_reclaim(lent);
+    }
     xbox_cs_note_owner(cs);
     if (g_cs_contention_reports <= 16) {
         fprintf(stderr, "  [CS] thread %lu acquired 0x%08X\n",

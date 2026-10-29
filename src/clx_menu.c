@@ -23,6 +23,7 @@
 extern volatile int nv2a_vk_fxaa, nv2a_vk_aniso;
 #endif
 extern volatile int xbox_widescreen;                 /* kernel_xbox.c */
+extern volatile float xbox_wide_ratio;
 void xa2_set_master_volume(float v);                 /* apu_xaudio2.c */
 void clx_scale_apply(void);                          /* switch_nx.c / here */
 
@@ -43,7 +44,7 @@ static const Item k_items[] = {
 #if CLX_PC_INPUT
     { "CONTROLLER", NULL, 0, { 0 }, { 0 }, 0, PAD },
 #endif
-    { "ASPECT", &g_clx.aspect169, 2, { 0, 1 }, { "4:3", "16:9" }, 0 },
+    { "ASPECT", &g_clx.aspect, 3, { 0, 1, 2 }, { "4:3", "16:9", "21:9" }, 0 },
     { "FRAME RATE", &g_clx.fps60, 2, { 0, 1 }, { "30", "60" }, RESTART },
     { "CAMERA", &g_clx.cam_free, 2, { 0, 1 }, { "CLASSIC", "FREE" }, 0 },
     { "INVERT CAMERA UP/DOWN", &g_clx.cam_invert, 2, { 0, 1 }, { "OFF", "ON" }, 0 },
@@ -125,8 +126,11 @@ static int restart_needed(const Item *it)
 /* Make a changed value take effect where the game and renderer allow it. */
 static void apply(const Item *it)
 {
-    if (it->val == &g_clx.aspect169)
-        xbox_widescreen = g_clx.aspect169;
+    if (it->val == &g_clx.aspect) {
+        if (g_clx.aspect)
+            xbox_wide_ratio = clx_aspect_ratio(g_clx.aspect);
+        xbox_widescreen = g_clx.aspect != 0;
+    }
     else if (it->val == &g_clx.fps_osd)
         ovl_fps_osd = g_clx.fps_osd;
     else if (it->val == &g_clx.volume)
