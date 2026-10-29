@@ -6,3 +6,5 @@ sensitivity_y=0.06
 # 1 = mouse up looks up (normal); 0 = inverted.
 invert_x=0
 invert_y=1
+# Extra gain while a weapon's aim camera is active (1.0 = no boost).
+aim_gain=1.8

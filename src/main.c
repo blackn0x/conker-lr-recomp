@@ -367,6 +367,10 @@ static int game_main(void)
      * would give it back to the title. */
     setenv("RECOMP_PAD_MASK", "0x20", 0);
     usb_gamepad_hook = clx_menu_hook;
+    {
+        extern void clx_mouse_report(uint8_t *report);
+        usb_gamepad_mouse_hook = clx_mouse_report;
+    }
 #endif
     /* button_glyphs (clx_buttons.c): the Xbox icon textures drawn in the
      * chosen pad's style; nothing hooked for the title's own Xbox icons. */

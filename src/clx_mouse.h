@@ -16,10 +16,17 @@
  * degrees (added to its pitch angle). */
 int clx_mouse_take(uint32_t camera, float *yaw, float *pitch);
 
-/* The right-stick deflection for this camera and frame, in the camera input
- * block's own units (-63..63, the range the game divides by 63). Each camera
- * receives it once per rendered frame. */
-int clx_mouse_stick(uint32_t camera, int *rx, int *ry);
+/* The one-frame deflection as raw USB pad axes (-32767..32767). */
+int clx_mouse_pad(int *rx, int *ry);
+
+/* Add the deflection to pad 1's 20-byte USB report (RX at 16, RY at 18), so
+ * every game system (player aim, camera users, the normal player camera)
+ * sees it exactly like the right stick. Used as usb_gamepad_mouse_hook. */
+void clx_mouse_report(uint8_t *report);
+
+/* Which camera is running: 0 = off (pad only), 1 = player camera,
+ * 2 = weapon aim (the slower aim camera gets the aim_gain boost). */
+void clx_mouse_set_mode(int mode);
 
 /* Preferred names used by the renderer. */
 void clx_mouse_motion(int dx, int dy);

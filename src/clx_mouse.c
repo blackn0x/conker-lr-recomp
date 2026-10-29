@@ -64,14 +64,15 @@ static SDL_SpinLock lock;
 static int dx_pending, dy_pending;
 static int captured;                 /* relative mode is on */
 static int frame_dx, frame_dy;       /* deltas handed out this frame */
-static int stick_x, stick_y;         /* pad deflection for the next poll */
+static int pad_x, pad_y;             /* raw pad axes (-32767..32767) */
 static uint32_t motion_frame;
 static uint32_t motion_tick;
 static uint32_t camera_tick;
 static struct { uint32_t camera, frame; } seen[64];
-static struct { uint32_t camera, frame; } seen_stick[64];
 static float sensitivity = 0.15f;
 static float sensitivity_y;
+static float aim_gain = 1.8f;         /* weapon/aim camera is slower */
+static int mouse_mode;                /* 0 off, 1 player, 2 weapon aim */
 static int invert_x, invert_y;
 static int dbg;
 
@@ -93,6 +94,9 @@ static void options_load(void)
         if (sscanf(line, "sensitivity_y=%f", &v) == 1 &&
             isfinite(v) && v >= 0.01f && v <= 5.0f)
             sensitivity_y = v;
+        if (sscanf(line, "aim_gain=%f", &v) == 1 &&
+            isfinite(v) && v >= 0.5f && v <= 4.0f)
+            aim_gain = v;
         if (sscanf(line, "invert_x=%f", &v) == 1)
             invert_x = v != 0.0f;
         if (sscanf(line, "invert_y=%f", &v) == 1)
@@ -119,7 +123,7 @@ static void capture(SDL_Window *window, int on)
     captured = on;
     dx_pending = dy_pending = 0;
     frame_dx = frame_dy = 0;
-    stick_x = stick_y = 0;
+    pad_x = pad_y = 0;
     ++motion_frame;
     SDL_AtomicUnlock(&lock);
     clx_camera_curve_mouse(on);   /* linear response, no stick deadzone */
@@ -240,20 +244,23 @@ void clx_mouse_frame(SDL_Window *window)
         float sy = sensitivity_y > 0.0f ? sensitivity_y : sensitivity;
         float nx = (float)frame_dx * sensitivity / 2.0f;
         float ny = -(float)frame_dy * sy / (50.3f / 60.0f);
-        int rx, ry;
+        int px, py;
+        float gain = mouse_mode == 2 ? aim_gain : 1.0f;
         if (invert_x) nx = -nx;
         if (invert_y) ny = -ny;
         if (nx > 0.9f) nx = 0.9f; else if (nx < -0.9f) nx = -0.9f;
         if (ny > 1.0f) ny = 1.0f; else if (ny < -1.0f) ny = -1.0f;
-        /* The camera's input block is in -63..63: the generated code does
-         * stick * 1.25 / 63. nx/ny are the desired curve inputs, so undo
-         * the 1.25 here as well. */
-        rx = (int)lrintf(nx * (63.0f / 1.25f));
-        ry = (int)lrintf(ny * (63.0f / 1.25f));
-        stick_x = rx;
-        stick_y = ry;
+        /* The game reads the camera input block as stick * 1.25 / 63;
+         * nx/ny are the desired curve inputs, so undo the 1.25 here. The
+         * aim camera is slower than the normal one, so give it extra gain. */
+        px = (int)lrintf(nx * (32767.0f / 1.25f) * gain);
+        py = (int)lrintf(ny * (32767.0f / 1.25f) * gain);
+        if (px > 32767) px = 32767; else if (px < -32768) px = -32768;
+        if (py > 32767) py = 32767; else if (py < -32768) py = -32768;
+        pad_x = mouse_mode ? px : 0;
+        pad_y = mouse_mode ? py : 0;
     } else {
-        stick_x = stick_y = 0;
+        pad_x = pad_y = 0;
     }
     ++motion_frame;
     SDL_AtomicUnlock(&lock);
@@ -261,35 +268,41 @@ void clx_mouse_frame(SDL_Window *window)
     if (dbg) {
         static int logged;
         if ((frame_dx || frame_dy) && logged++ < 120)
-            fprintf(stderr, "[mouse-frame] dx=%d dy=%d stick=%d,%d\n",
-                    frame_dx, frame_dy, stick_x, stick_y);
+            fprintf(stderr, "[mouse-frame] dx=%d dy=%d pad=%d,%d\n",
+                    frame_dx, frame_dy, pad_x, pad_y);
     }
 }
 
-int clx_mouse_stick(uint32_t camera, int *rx, int *ry)
+void clx_mouse_set_mode(int mode)
 {
-    unsigned slot = 0;
-    int sx = 0, sy = 0;
+    mouse_mode = mode;
+}
 
+int clx_mouse_pad(int *rx, int *ry)
+{
     SDL_AtomicLock(&lock);
-    while (slot < 64 && seen_stick[slot].camera && seen_stick[slot].camera != camera)
-        ++slot;
-    if (slot == 64)
-        slot = (camera >> 4) % 64;
-    if (seen_stick[slot].camera != camera) {
-        seen_stick[slot].camera = camera;
-        seen_stick[slot].frame = motion_frame - 1;
-    }
-    if (seen_stick[slot].frame != motion_frame) {
-        sx = stick_x;
-        sy = stick_y;
-        seen_stick[slot].frame = motion_frame;
-    }
+    *rx = pad_x;
+    *ry = pad_y;
     SDL_AtomicUnlock(&lock);
+    return *rx != 0 || *ry != 0;
+}
 
-    *rx = sx;
-    *ry = sy;
-    return sx != 0 || sy != 0;
+void clx_mouse_report(uint8_t *out)
+{
+    int mx = 0, my = 0, x, y;
+    if (!out || !clx_mouse_pad(&mx, &my))
+        return;
+    x = (int)(int16_t)(out[16] | (out[17] << 8)) + mx;
+    y = (int)(int16_t)(out[18] | (out[19] << 8)) + my;
+    if (x > 32767) x = 32767; else if (x < -32768) x = -32768;
+    if (y > 32767) y = 32767; else if (y < -32768) y = -32768;
+    out[16] = (uint8_t)x; out[17] = (uint8_t)((uint16_t)x >> 8);
+    out[18] = (uint8_t)y; out[19] = (uint8_t)((uint16_t)y >> 8);
+    if (dbg) {
+        static int logged;
+        if (logged++ < 40)
+            fprintf(stderr, "[mouse-pad] mx=%d my=%d => %d,%d\n", mx, my, x, y);
+    }
 }
 
 int clx_mouse_take(uint32_t camera, float *yaw, float *pitch)
