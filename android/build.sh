@@ -54,6 +54,7 @@ cmake -S "$REPO" -B "$BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-30 -DANDROID_STL=c++_static \
     -DSDL2_DIR="$DEPS/sdl2-android/lib/cmake/SDL2" \
     -Dglslang_DIR="$DEPS/glslang-android/lib/cmake/glslang" \
+    -DVOLK_DIR="$DEPS/volk" -DADRENOTOOLS_DIR="$DEPS/libadrenotools" \
     -DNFSU2_VULKAN=ON -DNFSU2_GEN_DIR="$GEN" -DXBOXRECOMP_DIR="$REPO/xboxrecomp" >/dev/null
 ninja -C "$BUILD_DIR" -j"$JOBS"
 
@@ -67,6 +68,13 @@ cp "$BUILD_DIR/libmain.so" "$OUT/android/symbols/libmain.so"
 "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-unneeded \
     -o "$STAGE/lib/arm64-v8a/libmain.so" "$BUILD_DIR/libmain.so"
 cp "$DEPS/sdl2-android/lib/libSDL2.so" "$STAGE/lib/arm64-v8a/"
+# libadrenotools' hooks: dlopen()ed from nativeLibraryDir with a custom GPU driver.
+for hook in hook_impl main_hook file_redirect_hook gsl_alloc_hook; do
+    so="$(find "$BUILD_DIR" -name "lib$hook.so" | head -1)"
+    [ -n "$so" ] || fail "lib$hook.so not built"
+    "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-unneeded \
+        -o "$STAGE/lib/arm64-v8a/lib$hook.so" "$so"
+done
 
 # Java: SDL's activity and ours.
 find "$SDL_SRC/android-project/app/src/main/java" "$REPO/android/java" -name '*.java' > "$STAGE/sources.txt"

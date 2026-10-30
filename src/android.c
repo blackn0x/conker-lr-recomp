@@ -360,30 +360,40 @@ Java_org_clx_recomp_Rumble_nativeInit(JNIEnv *env, jclass cls)
 {
     if (s_rumble_cls)
         return;
-    s_rumble_set = (*env)->GetStaticMethodID(env, cls, "set", "(IIIZ)V");
+    s_rumble_set = (*env)->GetStaticMethodID(env, cls, "set", "(IIIZ)I");
     s_rumble_cls = (jclass)(*env)->NewGlobalRef(env, cls);
 }
 
-void android_rumble(int port, unsigned low, unsigned high)
+/* What Rumble.set did, for the log (CLX_RUMBLE_TEST). */
+const char *android_rumble(int port, unsigned low, unsigned high)
 {
+    static const char *const what[] = {
+        "stopped", "controller, both motors", "controller, one motor", "phone",
+        "controller has no vibrator", "no controller, phone rumble off or absent",
+    };
     static int phone = -1;
     JNIEnv *env;
+    jint r;
 
-    if (!s_rumble_cls || !s_rumble_set || !(env = (JNIEnv *)SDL_AndroidGetJNIEnv()))
-        return;
+    if (!s_rumble_cls || !s_rumble_set)
+        return "not set up (Rumble.nativeInit never ran)";
+    if (!(env = (JNIEnv *)SDL_AndroidGetJNIEnv()))
+        return "no JNI environment on this thread";
     if (phone < 0) {
         const char *e = getenv("CLX_PHONE_RUMBLE");
         phone = !(e && *e == '0');
     }
-    (*env)->CallStaticVoidMethod(env, s_rumble_cls, s_rumble_set, (jint)port,
-                                 (jint)low, (jint)high, (jboolean)phone);
+    r = (*env)->CallStaticIntMethod(env, s_rumble_cls, s_rumble_set, (jint)port,
+                                    (jint)low, (jint)high, (jboolean)phone);
     if ((*env)->ExceptionCheck(env)) {
         static int told;
         (*env)->ExceptionDescribe(env);
         (*env)->ExceptionClear(env);
         if (!told++)
             fprintf(stderr, "[android] rumble failed (exception above)\n");
+        return "Java exception (see above)";
     }
+    return (r >= 0 && r < (jint)(sizeof what / sizeof what[0])) ? what[r] : "?";
 }
 
 #endif /* __ANDROID__ */

@@ -14,6 +14,7 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.io.File;
 
@@ -21,7 +22,8 @@ import java.io.File;
  * the game starts. Built in code: the APK has no layout resources. */
 public class ClxLauncher extends Activity {
     private TextView status;
-    private Button grant, start;
+    private Button grant, start, driver, sysDriver;
+    private static final int PICK_DRIVER = 1;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -54,9 +56,47 @@ public class ClxLauncher extends Activity {
         start.setOnClickListener(v -> startActivity(new Intent(this, ClxActivity.class)));
         col.addView(start);
 
+        /* A custom Vulkan driver (Turnip), loaded instead of the phone's own. */
+        driver = new Button(this);
+        driver.setText("GPU driver: pick a Turnip .zip");
+        driver.setOnClickListener(v -> {
+            Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            i.addCategory(Intent.CATEGORY_OPENABLE);
+            i.setType("*/*");
+            startActivityForResult(i, PICK_DRIVER);
+        });
+        col.addView(driver);
+
+        sysDriver = new Button(this);
+        sysDriver.setText("GPU driver: use the phone's own");
+        sysDriver.setOnClickListener(v -> {
+            GpuDriver.remove(this);
+            refresh();
+        });
+        col.addView(sysDriver);
+
         ScrollView sv = new ScrollView(this);
         sv.addView(col);
         setContentView(sv);
+    }
+
+    @Override
+    protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (request != PICK_DRIVER || result != RESULT_OK || data == null || data.getData() == null)
+            return;
+        Uri uri = data.getData();
+        driver.setEnabled(false);
+        driver.setText("Installing the driver...");
+        new Thread(() -> {
+            String err = GpuDriver.install(this, uri);
+            runOnUiThread(() -> {
+                driver.setText("GPU driver: pick a Turnip .zip");
+                if (err != null)
+                    Toast.makeText(this, "GPU driver: " + err, Toast.LENGTH_LONG).show();
+                refresh();
+            });
+        }).start();
     }
 
     @Override
@@ -95,6 +135,9 @@ public class ClxLauncher extends Activity {
         s.append(vk13 ? "✓ Vulkan 1.3\n" : "! The system does not report Vulkan 1.3; the game will probably not start\n");
         if (!arm64)
             s.append("✗ Not an arm64 device\n");
+        String drv = GpuDriver.describe(this);
+        s.append(drv == null ? "GPU driver: the phone's own\n"
+                             : "GPU driver: " + drv + " (custom; Adreno only, falls back to the phone's own if it does not load)\n");
         s.append("\nControls: on screen, or a Bluetooth or USB gamepad (the touch controls hide while one is connected).");
         s.append("\nSettings: ").append(ClxLog.DATA_DIR).append("/clx_options.txt and clx_env.txt");
         s.append("\nLogs (one folder per start, crash reports included):\n   ").append(ClxLog.LOG_DIR);
@@ -102,6 +145,8 @@ public class ClxLauncher extends Activity {
         status.setText(s.toString());
         status.setGravity(Gravity.START);
         grant.setEnabled(!storage);
+        driver.setEnabled(true);
+        sysDriver.setEnabled(drv != null);
         start.setEnabled(game && arm64);
     }
 }

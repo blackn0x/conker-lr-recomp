@@ -29,3 +29,6 @@ CLX_START_SINGLE=1
 #RECOMP_FPS_OSD=1
 # Rumble: with the touch controls the phone vibrates; 0 = only a controller.
 #CLX_PHONE_RUMBLE=0
+# Rumble test: 5 s after start, pad 1 (or the phone) rumbles for 1 s, and
+# the log says what vibrated ("[rumble test]" lines).
+#CLX_RUMBLE_TEST=1

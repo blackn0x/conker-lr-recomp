@@ -480,6 +480,7 @@ static int game_main(void)
     /* clx_options.txt (on the Switch read earlier, by switch_nx.c's boot);
      * the render scale goes to the renderer that starts later. */
     clx_options_load();
+    fs_target_fps(g_clx.fps60 ? 60 : 30);   /* Android: the performance hints' budget */
     if (!getenv("RECOMP_GL_SCALE") && g_clx.scale_handheld != 100) {
         char k[16];
         snprintf(k, sizeof k, "%.2f", g_clx.scale_handheld / 100.0);
@@ -494,8 +495,8 @@ static int game_main(void)
      * (clx_menu.c, which also keeps it from the title); RECOMP_PAD_MASK=0
      * would give it back to the title. */
     setenv("RECOMP_PAD_MASK", "0x20", 0);
-    usb_gamepad_hook = clx_menu_hook;
 #endif
+    usb_gamepad_hook = clx_pad_hook;      /* damage rumble, the menu (clx_rumble.c) */
     /* button_glyphs (clx_buttons.c): the Xbox icon textures drawn in the
      * chosen pad's style; nothing hooked for the title's own Xbox icons. */
     if (g_clx.glyphs) {

@@ -1,6 +1,7 @@
 package org.clx.recomp;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -14,7 +15,8 @@ import android.view.View;
 /* On-screen controls, drawn over SDL's surface. Each change goes to the
  * native side (src/android.c), which the input layer merges into pad 1 as it
  * does the keyboard. Hidden while a physical gamepad is connected; a touch
- * brings it back.
+ * brings it back. The small button at the top centre turns the controls off
+ * (only it stays on screen) and on again; the choice is kept.
  *
  * Buttons are a 16-bit mask in the order of xinput_device.c's k_pad_ctl:
  * up down left right start back lthumb rthumb (the Xbox wButtons bits) and
@@ -75,6 +77,9 @@ public class TouchPadView extends View implements InputManager.InputDeviceListen
     private int sentButtons = -1;
     private float sentLx, sentLy, sentRx, sentRy;
     private boolean hidden;             /* drawn nothing; a touch shows it */
+    private boolean off;                /* turned off with the toggle: only it is drawn */
+    private float toggleX, toggleY, toggleR;
+    private final SharedPreferences prefs;
 
     public TouchPadView(Context ctx) {
         super(ctx);
@@ -86,6 +91,8 @@ public class TouchPadView extends View implements InputManager.InputDeviceListen
         text.setFakeBoldText(true);
         setAlpha(0.55f);
         setHapticFeedbackEnabled(true);
+        prefs = ctx.getSharedPreferences("touchpad", Context.MODE_PRIVATE);
+        off = prefs.getBoolean("off", false);
         InputManager im = (InputManager) ctx.getSystemService(Context.INPUT_SERVICE);
         im.registerInputDeviceListener(this, null);
         updatePadConnected();
@@ -125,6 +132,9 @@ public class TouchPadView extends View implements InputManager.InputDeviceListen
         /* Back and Start sit either side of the top centre. */
         btns[8].px = w / 2f - 0.10f * u;
         btns[9].px = w / 2f + 0.10f * u;
+        toggleX = w / 2f;
+        toggleY = 0.20f * u;
+        toggleR = 0.040f * u;
         stickRadius = 0.13f * u;
         left.homeX = 0.20f * u;  left.homeY = 0.74f * u;
         right.homeX = w - 0.62f * u; right.homeY = 0.40f * u;
@@ -193,8 +203,25 @@ public class TouchPadView extends View implements InputManager.InputDeviceListen
         send();
     }
 
+    private boolean onToggle(float x, float y) {
+        float dx = x - toggleX, dy = y - toggleY, slop = toggleR * 1.4f;
+        return dx * dx + dy * dy < slop * slop;
+    }
+
     @Override
     public boolean onTouchEvent(MotionEvent e) {
+        int am = e.getActionMasked(), ai = e.getActionIndex();
+        if ((am == MotionEvent.ACTION_DOWN || am == MotionEvent.ACTION_POINTER_DOWN)
+                && !hidden && onToggle(e.getX(ai), e.getY(ai))) {
+            off = !off;
+            prefs.edit().putBoolean("off", off).apply();
+            release();
+            performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+            invalidate();
+            return true;
+        }
+        if (off)
+            return am == MotionEvent.ACTION_DOWN && onToggle(e.getX(ai), e.getY(ai));
         if (hidden) {
             hidden = false;
             invalidate();
@@ -259,6 +286,15 @@ public class TouchPadView extends View implements InputManager.InputDeviceListen
     @Override
     protected void onDraw(Canvas c) {
         if (hidden)
+            return;
+        fill.setColor(0xFF808080);
+        fill.setAlpha(off ? 60 : 110);
+        c.drawCircle(toggleX, toggleY, toggleR, fill);
+        c.drawCircle(toggleX, toggleY, toggleR, ring);
+        text.setTextSize(toggleR * 0.75f);
+        c.drawText(off ? "Pad" : "Hide", toggleX, toggleY - (text.descent() + text.ascent()) / 2, text);
+        text.setTextSize(0.045f * getHeight());
+        if (off)
             return;
         for (Btn b : btns) {
             boolean down = btnPointer[b.bit] >= 0;

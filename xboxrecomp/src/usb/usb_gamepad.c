@@ -507,6 +507,9 @@ int usb_gamepad_connected(int dev)
         || xbox_InputGetState((DWORD)dev, &state) == 0;
 }
 
+static unsigned long s_pulse_end[USB_GAMEPADS];
+static void rumble_send(int dev);
+
 /* A port's overlay menu (usb_gamepad.h): sees every report of pad 1 before
  * the title and may change it. */
 void (*usb_gamepad_hook)(uint8_t *report, unsigned host_buttons);
@@ -601,6 +604,8 @@ int usb_gamepad_report(int dev, uint8_t *out, int max)
 done:
     if (dev == 0 && usb_gamepad_hook)
         usb_gamepad_hook(out, host);
+    if (s_pulse_end[dev])
+        rumble_send(dev);           /* a usb_gamepad_pulse ends */
     if (dev == 0) {                 /* RECOMP_LAT_TRACE: a change starts a measurement */
         static uint8_t last[20];
         if (memcmp(last + 2, out + 2, 18)) {
@@ -613,17 +618,22 @@ done:
 
 /* ---- the output report ------------------------------------------------- */
 
-void usb_gamepad_output(int dev, const uint8_t *data, int len)
+/* The title's motor speeds, and a port's pulse on top (usb_gamepad_pulse):
+ * the host pad gets the stronger of the two on each motor. */
+static uint16_t s_title_l[USB_GAMEPADS], s_title_r[USB_GAMEPADS];
+static uint16_t s_pulse_l[USB_GAMEPADS], s_pulse_r[USB_GAMEPADS];
+
+static void rumble_send(int dev)
 {
     static int trace = -1;
     static uint16_t last_l[USB_GAMEPADS] = { 0xFFFF, 0xFFFF };
     static uint16_t last_r[USB_GAMEPADS] = { 0xFFFF, 0xFFFF };
     XBOX_VIBRATION vib;
 
-    if (len < 6 || data[0] != 0x00 || data[1] < 6)
-        return;
-    vib.wLeftMotorSpeed  = (uint16_t)(data[2] | (data[3] << 8));
-    vib.wRightMotorSpeed = (uint16_t)(data[4] | (data[5] << 8));
+    if (s_pulse_end[dev] && (long)(GetTickCount() - s_pulse_end[dev]) >= 0)
+        s_pulse_end[dev] = s_pulse_l[dev] = s_pulse_r[dev] = 0;
+    vib.wLeftMotorSpeed  = s_title_l[dev] > s_pulse_l[dev] ? s_title_l[dev] : s_pulse_l[dev];
+    vib.wRightMotorSpeed = s_title_r[dev] > s_pulse_r[dev] ? s_title_r[dev] : s_pulse_r[dev];
     /* The title resends the same speeds every frame or so; the host call
      * can be an IPC (Switch hid), so only changes go out. */
     if (vib.wLeftMotorSpeed == last_l[dev] && vib.wRightMotorSpeed == last_r[dev])
@@ -638,4 +648,25 @@ void usb_gamepad_output(int dev, const uint8_t *data, int len)
         fflush(stderr);
     }
     xbox_InputSetState((DWORD)dev, &vib);
+}
+
+void usb_gamepad_output(int dev, const uint8_t *data, int len)
+{
+    if (len < 6 || data[0] != 0x00 || data[1] < 6)
+        return;
+    s_title_l[dev] = (uint16_t)(data[2] | (data[3] << 8));
+    s_title_r[dev] = (uint16_t)(data[4] | (data[5] << 8));
+    rumble_send(dev);
+}
+
+void usb_gamepad_pulse(int dev, uint16_t left, uint16_t right, unsigned ms)
+{
+    if (dev < 0 || dev >= USB_GAMEPADS)
+        return;
+    s_pulse_l[dev] = left;
+    s_pulse_r[dev] = right;
+    s_pulse_end[dev] = (unsigned long)GetTickCount() + ms;
+    if (!s_pulse_end[dev])
+        s_pulse_end[dev] = 1;
+    rumble_send(dev);
 }

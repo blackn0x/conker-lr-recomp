@@ -12,3 +12,5 @@ aspect=4:3
 fps=30
 # FPS counter top-left
 #fps_counter=1
+# Rumble when Conker is hurt (1, default) or not (0)
+#rumble_damage=0

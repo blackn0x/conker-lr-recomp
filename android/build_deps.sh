@@ -2,6 +2,8 @@
 # Cross-builds what the Android port links, for arm64-v8a:
 #   SDL2     window, Vulkan surface, audio, game controllers (libSDL2.so + its Java side)
 #   glslang  the Vulkan renderer compiles its shaders at run time (static, no optimizer)
+#   volk, libadrenotools  sources only (the game's CMake builds them): Vulkan
+#            through function pointers, and loading a custom driver (Turnip)
 #
 #   android/build_deps.sh
 #
@@ -18,6 +20,8 @@ DEPS="${DEPS:-$REPO/out/work/deps}"
 ANDROID_API="${ANDROID_API:-30}"
 SDL_VER=2.30.9
 GLSLANG_VER=14.3.0
+VOLK_REV=b7764bc7f5880139859a15d1609d2ee0c6251608
+ADRENOTOOLS_REV=8fae8ce254dfc1344527e05301e43f37dea2df80
 JOBS="${JOBS:-$(nproc)}"
 
 [ -f "$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" ] || {
@@ -34,8 +38,18 @@ fetch() {   # fetch <dir> <url>: unpack a source tarball into its own directory 
     mv "$1.tmp" "$1"
 }
 
+clone() {   # clone <dir> <url> <commit>: a git checkout, with submodules, once
+    [ -d "$1" ] && return 0
+    git clone -q "$2" "$1.tmp"
+    git -C "$1.tmp" checkout -q "$3"
+    git -C "$1.tmp" submodule -q update --init --recursive
+    mv "$1.tmp" "$1"
+}
+
 fetch "$DEPS/sdl2" "https://github.com/libsdl-org/SDL/releases/download/release-$SDL_VER/SDL2-$SDL_VER.tar.gz"
 fetch "$DEPS/glslang" "https://github.com/KhronosGroup/glslang/archive/refs/tags/$GLSLANG_VER.tar.gz"
+clone "$DEPS/volk" https://github.com/zeux/volk "$VOLK_REV"
+clone "$DEPS/libadrenotools" https://github.com/bylaws/libadrenotools "$ADRENOTOOLS_REV"
 
 if [ ! -f "$DEPS/sdl2-android/lib/libSDL2.so" ]; then
     echo "== SDL2 $SDL_VER"

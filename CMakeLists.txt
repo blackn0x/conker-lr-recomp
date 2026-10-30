@@ -53,6 +53,7 @@ set(GAME_SOURCES
     src/switch_saltynx.c
     src/clx_options.c
     src/clx_menu.c
+    src/clx_rumble.c
     src/clx_buttons.c
 )
 

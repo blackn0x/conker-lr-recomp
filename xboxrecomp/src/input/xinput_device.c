@@ -482,6 +482,43 @@ static void touch_apply(XBOX_INPUT_STATE *s)
 #define touch_apply(s) ((void)0)
 #endif
 
+#if !defined(__SWITCH__)
+/* CLX_RUMBLE_TEST=1: five seconds after the first poll, pad 1 rumbles at
+ * full strength for a second through the game's own path
+ * (xbox_InputSetState), and the log says which way it went. It tells a
+ * controller or phone that cannot rumble from a game that never asks. */
+static int s_rumble_test_log;
+
+static void rumble_test_tick(void)
+{
+    static int state = -1;      /* -1 unread, 0 off or done, 1 waiting, 2 on */
+    static Uint32 t0;
+    Uint32 now = SDL_GetTicks();
+    XBOX_VIBRATION v;
+
+    if (state < 0) {
+        const char *e = getenv("CLX_RUMBLE_TEST");
+        state = (e && *e && *e != '0') ? 1 : 0;
+        t0 = now;
+    }
+    if (state == 1 && now - t0 >= 5000) {
+        fprintf(stderr, "  [rumble test] pad 1 on: %s\n",
+                g_pads[0] ? SDL_GameControllerName(g_pads[0]) : "no SDL controller");
+        v.wLeftMotorSpeed = v.wRightMotorSpeed = 0xFFFF;
+        s_rumble_test_log = 1;
+        xbox_InputSetState(0, &v);
+        state = 2;
+        t0 = now;
+    } else if (state == 2 && now - t0 >= 1000) {
+        v.wLeftMotorSpeed = v.wRightMotorSpeed = 0;
+        xbox_InputSetState(0, &v);
+        s_rumble_test_log = 0;
+        fprintf(stderr, "  [rumble test] pad 1 off\n");
+        state = 0;
+    }
+}
+#endif
+
 DWORD xbox_InputGetState(DWORD dwPort, XBOX_INPUT_STATE *pState)
 {
     if (dwPort >= XBOX_MAX_CONTROLLERS || !pState)
@@ -522,6 +559,7 @@ DWORD xbox_InputGetState(DWORD dwPort, XBOX_INPUT_STATE *pState)
             last = now;
             refresh_controllers();
         }
+        rumble_test_tick();
     }
 #endif
     SDL_GameController *c = g_pads[dwPort];
@@ -603,16 +641,24 @@ DWORD xbox_InputSetState(DWORD dwPort, const XBOX_VIBRATION *pVibration)
      * (usb_gamepad_output), so a rumble lasts until the next call -- SDL's
      * longest; zero speeds stop it. This was 1 s, which cut every longer
      * rumble short. */
-    if (c && SDL_GameControllerRumble(c, pVibration->wLeftMotorSpeed,
-                                      pVibration->wRightMotorSpeed, 0xFFFF) == 0)
-        return ERROR_SUCCESS;
+    if (c) {
+        int r = SDL_GameControllerRumble(c, pVibration->wLeftMotorSpeed,
+                                         pVibration->wRightMotorSpeed, 0xFFFF);
+        if (s_rumble_test_log)
+            fprintf(stderr, "  [rumble test] SDL rumble: %s\n",
+                    r == 0 ? "accepted" : SDL_GetError());
+        if (r == 0)
+            return ERROR_SUCCESS;
+    }
 #if defined(__ANDROID__)
     /* SDL has no rumble for Android's own joysticks; Rumble.java does it,
      * and vibrates the phone for pad 1 on the touch controls. */
     {
-        extern void android_rumble(int port, unsigned low, unsigned high);
-        android_rumble((int)dwPort, pVibration->wLeftMotorSpeed,
-                       pVibration->wRightMotorSpeed);
+        extern const char *android_rumble(int port, unsigned low, unsigned high);
+        const char *how = android_rumble((int)dwPort, pVibration->wLeftMotorSpeed,
+                                         pVibration->wRightMotorSpeed);
+        if (s_rumble_test_log)
+            fprintf(stderr, "  [rumble test] Rumble.java: %s\n", how);
         return ERROR_SUCCESS;
     }
 #else

@@ -54,6 +54,10 @@ extern void (*usb_gamepad_hook)(uint8_t *report, unsigned host_buttons);
  * pad; anything else is ignored. */
 void usb_gamepad_output(int dev, const uint8_t *data, int len);
 
+/* A port's own rumble on the host pad for `ms` milliseconds, on top of the
+ * title's (each motor gets the stronger of the two). */
+void usb_gamepad_pulse(int dev, uint16_t left, uint16_t right, unsigned ms);
+
 /* The address the host assigned with SET_ADDRESS, 0 until it does. */
 uint8_t usb_gamepad_address(int dev);
 

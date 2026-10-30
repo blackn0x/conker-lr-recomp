@@ -24,6 +24,7 @@ typedef struct {
     volatile int aniso;          /* 1..16 (Vulkan) */
     volatile int fxaa;           /* (Vulkan) */
     volatile int glyphs;         /* button icons: 0 Xbox, 1 Switch, 2 PlayStation */
+    volatile int rumble_damage;  /* 1 = the pad rumbles when Conker is hurt (clx_rumble.c) */
 } ClxSettings;
 
 extern ClxSettings g_clx;
@@ -46,7 +47,11 @@ void clx_bind_reset(void);
 void clx_buttons_hook(unsigned int va, unsigned int color, unsigned int w, unsigned int h,
                       unsigned int *argb);
 
-/* The in-game menu (clx_menu.c): usb_gamepad_hook. */
+/* The in-game menu (clx_menu.c), called from clx_pad_hook. */
 void clx_menu_hook(unsigned char *report, unsigned host_buttons);
+
+/* usb_gamepad_hook (clx_rumble.c): the damage rumble, then the menu where
+ * there is one. */
+void clx_pad_hook(unsigned char *report, unsigned host_buttons);
 
 #endif

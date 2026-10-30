@@ -12,6 +12,11 @@ to the phone's **Download** folder. If the game crashes, the crash report goes i
 - A GPU driver with **Vulkan 1.3**, `VK_KHR_push_descriptor` and
   `VK_EXT_vertex_input_dynamic_state`. Recent Adreno (Snapdragon 8 Gen 1 and newer), Mali and
   Xclipse drivers usually have them. Older drivers do not. If one is missing, the log names it.
+- On Adreno, a **custom driver** (Mesa Turnip) can be used instead of the phone's own: in the
+  launcher, *GPU driver: pick a Turnip .zip* takes an AdrenoTools driver package (`meta.json`
+  and the driver's `.so`, as in the Turnip releases for emulators). It is loaded with
+  libadrenotools; *use the phone's own* goes back. The log's `[VK]` lines name the driver in
+  use, and one that does not load falls back to the phone's own.
 - 8 GB of RAM is recommended. The game reserves a 4 GB address range for the Xbox memory.
 - About 5 GB free for the game folder.
 - Touch controls are built in. A **gamepad** (Bluetooth or USB) is better; the touch controls

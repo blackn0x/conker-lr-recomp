@@ -19,6 +19,7 @@ public class ClxActivity extends SDLActivity {
     protected void onCreate(Bundle savedInstanceState) {
         ClxLog.install("game");
         ExitInfo.record(this);         /* how the last run ended, for the log */
+        GpuDriver.apply(this);         /* a custom Vulkan driver, if one is picked */
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         /* Here, on the UI thread: the game's threads cannot look up app

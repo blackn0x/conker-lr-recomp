@@ -27,11 +27,26 @@ if(NINTENDO_SWITCH)
         "${NVK_SDK}/lib/libvulkan.a" expat zstd z nx
         "${NVK_SDK}/lib/libvulkan.a" expat zstd z nx stdc++ m)
 elseif(ANDROID)
-    # The NDK's Vulkan loader (libvulkan.so, API 24+) and SDL2 from
-    # android/build_deps.sh. glslang is built there without its optimizer;
-    # its SPIR-V output (glslang_program_SPIRV_*) is a library of its own.
+    # SDL2 from android/build_deps.sh. glslang is built there without its
+    # optimizer; its SPIR-V output (glslang_program_SPIRV_*) is a library of
+    # its own. Vulkan comes through volk: the system's libvulkan.so, or a
+    # custom driver (Mesa Turnip) that libadrenotools loads; its hook
+    # libraries (libmain_hook.so, ...) go into the APK next to libmain.so.
+    set(VOLK_DIR "" CACHE PATH "volk source (android/build_deps.sh)")
+    set(ADRENOTOOLS_DIR "" CACHE PATH "libadrenotools source (android/build_deps.sh)")
+    if(NOT EXISTS "${VOLK_DIR}/volk.c" OR NOT EXISTS "${ADRENOTOOLS_DIR}/CMakeLists.txt")
+        message(FATAL_ERROR "VOLK_DIR and ADRENOTOOLS_DIR must point at volk and libadrenotools (android/build_deps.sh)")
+    endif()
+    add_subdirectory("${ADRENOTOOLS_DIR}" adrenotools)
+    foreach(hook hook_impl main_hook file_redirect_hook gsl_alloc_hook)
+        target_link_options(${hook} PRIVATE "-Wl,-z,max-page-size=16384")
+    endforeach()
+    target_sources(xbox_nv2a_vk PRIVATE "${VOLK_DIR}/volk.c")
+    target_include_directories(xbox_nv2a_vk PUBLIC "${VOLK_DIR}")
+    target_compile_definitions(xbox_nv2a_vk PUBLIC VK_USE_PLATFORM_ANDROID_KHR=1)
+    add_dependencies(xbox_nv2a_vk main_hook file_redirect_hook gsl_alloc_hook)
     find_package(SDL2 REQUIRED)
-    target_link_libraries(xbox_nv2a_vk PUBLIC glslang::SPIRV SDL2::SDL2 vulkan c++_static c++abi)
+    target_link_libraries(xbox_nv2a_vk PUBLIC glslang::SPIRV SDL2::SDL2 adrenotools dl c++_static c++abi)
 else()
     find_package(Vulkan REQUIRED)
     find_package(PkgConfig REQUIRED)

@@ -56,13 +56,16 @@ public final class Rumble {
     }
 
     /* low / high: XInput motor speeds, 0..65535. phone: pad 1 may fall back
-     * to the phone's own vibrator. */
-    static synchronized void set(int port, int low, int high, boolean phone) {
+     * to the phone's own vibrator. Returns what vibrated, for the log
+     * (src/android.c names them): 0 nothing asked, 1 a controller's two
+     * motors, 2 a controller's one, 3 the phone, 4 a controller without a
+     * vibrator, 5 no controller and no phone rumble. */
+    static synchronized int set(int port, int low, int high, boolean phone) {
         if (port < 0 || port >= current.length)
-            return;
+            return 5;
         stop(port);
         if (low == 0 && high == 0)
-            return;
+            return 0;
         InputDevice d = gamepad(port);
         if (d != null) {
             if (Build.VERSION.SDK_INT >= 31) {
@@ -76,24 +79,26 @@ public final class Rumble {
                         c.addVibrator(ids[1], effect(vm.getVibrator(ids[1]), high));
                     vm.vibrate(c.combine());
                     current[port] = vm;
-                    return;
+                    return 1;
                 }
             }
             Vibrator v = d.getVibrator();
-            if (v.hasVibrator()) {
-                v.vibrate(effect(v, Math.max(low, high)));
-                current[port] = v;
-            }
-            return;
+            if (!v.hasVibrator())
+                return 4;
+            v.vibrate(effect(v, Math.max(low, high)));
+            current[port] = v;
+            return 2;
         }
         if (port != 0 || !phone)
-            return;
+            return 5;
         Context ctx = SDLActivity.getContext();
         Vibrator v = ctx == null ? null : (Vibrator) ctx.getSystemService(Context.VIBRATOR_SERVICE);
         if (v != null && v.hasVibrator()) {
             /* A phone has one motor: the stronger of the two, softened. */
             v.vibrate(effect(v, Math.max(low, high) * 3 / 4));
             current[port] = v;
+            return 3;
         }
+        return 5;
     }
 }

@@ -53,10 +53,19 @@
 #include <switch.h>
 #define VK_USE_PLATFORM_VI_NN 1
 #endif
+#if defined(__ANDROID__)
+#include <volk.h>                   /* vk* through pointers: see vk_load */
+#include <adrenotools/driver.h>
+#include <dlfcn.h>
+#else
 #include <vulkan/vulkan.h>
+#endif
 #if !defined(__SWITCH__)
 #include <SDL.h>
 #include <SDL_vulkan.h>
+#endif
+#if defined(__ANDROID__)
+#include <SDL_syswm.h>
 #endif
 #include <glslang/Include/glslang_c_interface.h>
 #include <glslang/Public/resource_limits_c.h>
@@ -266,7 +275,7 @@ static uint8_t s_ts_began[VK_FRAMES], s_ts_done[VK_FRAMES];
 static int ts_ready(void)
 {
     static int tried;
-    if (!tried && fs_on()) {
+    if (!tried && fs_want_gpu()) {
         VkPhysicalDeviceProperties pp;
         VkQueryPoolCreateInfo qi = { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
         tried = 1;
@@ -3050,6 +3059,56 @@ static int create_swapchain(void)
     return 1;
 }
 
+#if defined(__ANDROID__)
+/* Android: the system driver (libvulkan.so), or a custom one picked in the
+ * launcher (Mesa Turnip for Adreno) that libadrenotools loads:
+ *   RECOMP_VK_DRIVER_DIR  its folder in the app's own storage, ending in '/'
+ *   RECOMP_VK_DRIVER_LIB  its .so in there (meta.json's libraryName)
+ *   RECOMP_VK_HOOK_DIR    the app's nativeLibraryDir (libmain_hook.so)
+ * A driver that does not load falls back to the system one. */
+static int vk_load(void)
+{
+    const char *dir = getenv("RECOMP_VK_DRIVER_DIR"), *lib = getenv("RECOMP_VK_DRIVER_LIB");
+    const char *hooks = getenv("RECOMP_VK_HOOK_DIR");
+
+    if (dir && *dir && lib && *lib && hooks && *hooks) {
+        void *h = adrenotools_open_libvulkan(RTLD_NOW, ADRENOTOOLS_DRIVER_CUSTOM, NULL, hooks,
+                                             dir, lib, NULL, NULL);
+        void *gipa = h ? dlsym(h, "vkGetInstanceProcAddr") : NULL;
+        if (gipa) {
+            volkInitializeCustom((PFN_vkGetInstanceProcAddr)gipa);
+            LOGE("custom driver: %s%s\n", dir, lib);
+            return 1;
+        }
+        {
+            const char *why = dlerror();
+            LOGE("custom driver %s%s did not load (%s): the system driver instead\n",
+                 dir, lib, why ? why : "no vkGetInstanceProcAddr");
+        }
+    }
+    return volkInitialize() == VK_SUCCESS;
+}
+#endif
+
+#if !defined(__SWITCH__)
+/* The window's surface. Android makes its own: SDL's would go through the
+ * system driver, not the one vk_load picked. */
+static int make_surface(void)
+{
+#if defined(__ANDROID__)
+    VkAndroidSurfaceCreateInfoKHR sci = { VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR };
+    SDL_SysWMinfo wi;
+    SDL_VERSION(&wi.version);
+    if (!SDL_GetWindowWMInfo(s_win, &wi) || !wi.info.android.window)
+        return 0;
+    sci.window = wi.info.android.window;
+    return vkCreateAndroidSurfaceKHR(s_inst, &sci, NULL, &s_surface) == VK_SUCCESS;
+#else
+    return SDL_Vulkan_CreateSurface(s_win, s_inst, &s_surface);
+#endif
+}
+#endif
+
 static int ready(void)
 {
     VkApplicationInfo ai = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
@@ -3124,6 +3183,12 @@ static int ready(void)
             layers[nlayers++] = "VK_LAYER_KHRONOS_validation";
     }
 #endif
+#if defined(__ANDROID__)
+    if (!vk_load()) {
+        LOGE("no Vulkan driver\n");
+        return 0;
+    }
+#endif
     ai.pApplicationName = "nfsu2x";
     ai.pEngineName = "xboxrecomp";
     ai.apiVersion = VK_API_VERSION_1_3;
@@ -3136,6 +3201,9 @@ static int ready(void)
         LOGE("vkCreateInstance failed\n");
         return 0;
     }
+#if defined(__ANDROID__)
+    volkLoadInstance(s_inst);
+#endif
     n = 8;
     if (vkEnumeratePhysicalDevices(s_inst, &n, pds) != VK_SUCCESS || !n) {
         LOGE("no Vulkan device\n");
@@ -3231,8 +3299,8 @@ static int ready(void)
         }
     }
 #else
-    if (!s_headless && !SDL_Vulkan_CreateSurface(s_win, s_inst, &s_surface)) {
-        LOGE("SDL_Vulkan_CreateSurface: %s\n", SDL_GetError());
+    if (!s_headless && !make_surface()) {
+        LOGE("no window surface: %s\n", SDL_GetError());
         s_headless = 1;
     }
 #endif
@@ -3279,6 +3347,9 @@ static int ready(void)
         LOGE("vkCreateDevice failed (needs push descriptors, dynamic vertex input, Vulkan 1.3)\n");
         return 0;
     }
+#if defined(__ANDROID__)
+    volkLoadDevice(s_dev);
+#endif
     vkGetDeviceQueue(s_dev, s_qfam, 0, &s_queue);
 #define GET(p, name) p = (void *)vkGetDeviceProcAddr(s_dev, name); if (!p) { LOGE("missing %s\n", name); return 0; }
     GET(p_push_desc, "vkCmdPushDescriptorSetKHR");
@@ -5427,7 +5498,7 @@ static void android_background(void)
     s_swapchain = VK_NULL_HANDLE;
     vkDestroySurfaceKHR(s_inst, s_surface, NULL);
     s_surface = VK_NULL_HANDLE;
-    if (!SDL_Vulkan_CreateSurface(s_win, s_inst, &s_surface) || !create_swapchain()) {
+    if (!make_surface() || !create_swapchain()) {
         LOGE("no surface after the app came back (%s); running headless\n", SDL_GetError());
         s_headless = 1;
         return;

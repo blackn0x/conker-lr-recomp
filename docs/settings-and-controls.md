@@ -65,6 +65,7 @@ The menu saves its values here. You can also edit the file with a text editor. O
 | `aniso` | `1`, `2`, `4`, `8`, `16` | Anisotropic filtering (Vulkan build). |
 | `fxaa` | `0`, `1` | FXAA (Vulkan build). |
 | `button_glyphs` | `switch`, `xbox`, `ps` | Button icons in the game (default: Switch on the Switch, Xbox on a PC). |
+| `rumble_damage` | `0`, `1` | The pad rumbles when Conker is hurt (default on). The game itself rumbles only for a few scripted events; this adds hits and falls. The game's own Vibration setting also turns it off. |
 | `key_<control>` | a key name | PC keyboard binding. See below. |
 | `pad_<control>` | a pad input | PC gamepad binding. See below. |
 

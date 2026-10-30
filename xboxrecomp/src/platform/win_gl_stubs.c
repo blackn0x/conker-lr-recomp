@@ -8,6 +8,8 @@
 /* RECOMP_FRAME_STATS reads POSIX per-thread CPU clocks: not available here. */
 int  fs_on(void) { return 0; }
 void fs_thread(int which) { (void)which; }
+int  fs_want_gpu(void) { return 0; }
+void fs_target_fps(int fps) { (void)fps; }
 void fs_add(int stat, uint64_t ns) { (void)stat; (void)ns; }
 void fs_frame(unsigned draws, unsigned programs, unsigned textures)
 {
