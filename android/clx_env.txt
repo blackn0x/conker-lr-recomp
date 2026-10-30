@@ -32,3 +32,6 @@ CLX_START_SINGLE=1
 # Rumble test: 5 s after start, pad 1 (or the phone) rumbles for 1 s, and
 # the log says what vibrated ("[rumble test]" lines).
 #CLX_RUMBLE_TEST=1
+# Compressed (BC/DXT) textures: on Qualcomm's own driver they are decoded on
+# the CPU (it garbles some); 1 = on the GPU anyway, 0 = on the CPU everywhere.
+#RECOMP_GL_DXT=1

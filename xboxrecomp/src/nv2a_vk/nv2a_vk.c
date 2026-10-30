@@ -3271,9 +3271,20 @@ static int ready(void)
         if (!(fp.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT))
             s_depth_fmt = VK_FORMAT_D32_SFLOAT_S8_UINT;
         {
+            /* Qualcomm's own Adreno driver garbles some BC textures (white
+             * chains, rainbow walls in Conker's barn): decoded on the CPU
+             * there unless RECOMP_GL_DXT=1. Turnip on the same GPU is fine. */
+            VkPhysicalDeviceDriverProperties dp = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES };
+            VkPhysicalDeviceProperties2 pp2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
             const char *e = getenv("RECOMP_GL_DXT");
+            pp2.pNext = &dp;
+            vkGetPhysicalDeviceProperties2(s_pd, &pp2);
             if (e && *e == '0')
                 s_have_bc = 0;
+            else if (!(e && *e == '1') && s_have_bc && dp.driverID == VK_DRIVER_ID_QUALCOMM_PROPRIETARY) {
+                s_have_bc = 0;
+                LOGE("Qualcomm driver: BC textures decoded on the CPU (RECOMP_GL_DXT=1: on the GPU)\n");
+            }
         }
     }
 

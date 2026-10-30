@@ -14,3 +14,5 @@ fps=30
 #fps_counter=1
 # Rumble when Conker is hurt (1, default) or not (0)
 #rumble_damage=0
+# A short rumble when Conker's weapon hits an enemy (1, default) or not (0)
+#rumble_hit=0

@@ -1,4 +1,5 @@
-/* Rumble when Conker is hurt (rumble_damage=1 in clx_options.txt).
+/* Rumble when Conker is hurt (rumble_damage=1 in clx_options.txt) and
+ * when he hits something (rumble_hit=1).
  *
  * The game itself only rumbles for a few scripted events and effects
  * (0x0015A3F0 and its callers); taking a hit or a fall does nothing. This
@@ -11,7 +12,12 @@
  * checks (0x0015A3F0: front end, pause and cutscene flags) all clear -- and
  * when the value before it had held for half a second and was a plausible
  * energy (1..6), so the title's demo, a level load or a respawn rebuilding
- * the table does not rumble. */
+ * the table does not rumble.
+ *
+ * Hits: every other object has the same energy word, in the table's 0x80
+ * slots (in use: the byte at [0x0084A5FC] + slot; 0x00042910 walks them).
+ * A drop on one that has been there half a second is Conker hitting it: a
+ * short pulse, a stronger one when it ends at 0. */
 #include "clx_settings.h"
 #include "usb/usb_gamepad.h"
 
@@ -26,6 +32,9 @@ extern ptrdiff_t g_xbox_mem_offset;
 #define OBJ_ENERGY     0x3AEu
 #define OPT_VIBRATION  0x0084B141u
 #define ENERGY_MAX     6
+#define OBJ_USED       0x0084A5FCu
+#define OBJ_SLOTS      0x80
+#define OBJ_SIZE       0x6D0u
 
 static const void *guest(uint32_t va)
 {
@@ -89,9 +98,53 @@ static void damage_tick(void)
     since = now;
 }
 
+static void hit_tick(void)
+{
+    static int16_t last[OBJ_SLOTS];
+    static unsigned born[OBJ_SLOTS];     /* when the slot was first seen; 0: not tracked */
+    static uint32_t last_table;
+    uint32_t table, used;
+    unsigned now;
+    int i, hit = 0, kill = 0;
+
+    if (!g_clx.rumble_hit || !g_xbox_mem_offset)
+        return;
+    table = *(const volatile uint32_t *)guest(OBJ_TABLE);
+    used = *(const volatile uint32_t *)guest(OBJ_USED);
+    now = now_ms() | 1;
+    if (!table || table >= 0x04000000u || !used || used >= 0x04000000u
+            || table != last_table || !in_play()) {
+        last_table = table;
+        for (i = 0; i < OBJ_SLOTS; i++)
+            born[i] = 0;
+        return;
+    }
+    for (i = 1; i < OBJ_SLOTS; i++) {            /* 0 is Conker */
+        int16_t e;
+        if (!*(const volatile uint8_t *)guest(used + i)) {
+            born[i] = 0;
+            continue;
+        }
+        e = *(const volatile int16_t *)guest(table + i * OBJ_SIZE + OBJ_ENERGY);
+        if (born[i] && e < last[i] && e >= 0 && last[i] <= 100 && now - born[i] >= 500) {
+            printf("[rumble] hit: object %d energy %d -> %d\n", i, last[i], e);
+            if (e == 0)
+                kill = 1;
+            else
+                hit = 1;
+        }
+        if (!born[i])
+            born[i] = now;
+        last[i] = e;
+    }
+    if ((hit || kill) && *(const volatile uint8_t *)guest(OPT_VIBRATION))
+        usb_gamepad_pulse(0, kill ? 0x9000 : 0x5000, kill ? 0xD000 : 0xA000, kill ? 220 : 110);
+}
+
 void clx_pad_hook(unsigned char *report, unsigned host_buttons)
 {
     damage_tick();
+    hit_tick();
 #if !defined(_WIN32) || defined(CLX_PC_GL)
     clx_menu_hook(report, host_buttons);
 #else

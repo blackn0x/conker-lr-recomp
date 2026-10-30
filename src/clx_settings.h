@@ -25,6 +25,7 @@ typedef struct {
     volatile int fxaa;           /* (Vulkan) */
     volatile int glyphs;         /* button icons: 0 Xbox, 1 Switch, 2 PlayStation */
     volatile int rumble_damage;  /* 1 = the pad rumbles when Conker is hurt (clx_rumble.c) */
+    volatile int rumble_hit;     /* 1 = a short rumble when Conker hits something (clx_rumble.c) */
 } ClxSettings;
 
 extern ClxSettings g_clx;

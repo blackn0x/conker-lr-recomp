@@ -15,6 +15,7 @@
  *   button_glyphs=switch|xbox|ps   button icons (default switch on the Switch, xbox on a PC)
  *   rumble_damage=1            the pad rumbles when Conker is hurt (the game only
  *                              rumbles for a few scripted events); 0 = off
+ *   rumble_hit=1               a short rumble when Conker's weapon hits an enemy; 0 = off
  *   key_<control>=<key>        PC keyboard: the key for a pad control, SDL key names
  *                              (key_a=Space, key_rs_up=Up; controls in input/sdl_keys.h)
  *
@@ -69,9 +70,9 @@ void clx_bind_reset(void)
 
 ClxSettings g_clx = {
 #if defined(__SWITCH__)
-    0, 0, 0, 0, 1, 0, 100, 150, 225, 16, 1, 1, 1 /* Switch button icons */
+    0, 0, 0, 0, 1, 0, 100, 150, 225, 16, 1, 1, 1, 1 /* Switch button icons */
 #else
-    0, 0, 0, 0, 1, 0, 100, 100, 225, 16, 1, 0, 1 /* PC: render scale 100%, Xbox icons */
+    0, 0, 0, 0, 1, 0, 100, 100, 225, 16, 1, 0, 1, 1 /* PC: render scale 100%, Xbox icons */
 #endif
 };
 
@@ -139,6 +140,7 @@ void clx_options_load(void)
             else if (!strcmp(line, "button_glyphs"))
                 g_clx.glyphs = !strcmp(v, "xbox") ? 0 : !strcmp(v, "ps") ? 2 : 1;
             else if (!strcmp(line, "rumble_damage")) g_clx.rumble_damage = on(v);
+            else if (!strcmp(line, "rumble_hit")) g_clx.rumble_hit = on(v);
 #if CLX_PC_INPUT
             else if ((!strncmp(line, "key_", 4) || !strncmp(line, "pad_", 4)) && !clx_bind(line, v))
                 fprintf(stderr, "[options] unknown binding %s=%s\n", line, v);
@@ -153,6 +155,7 @@ void clx_options_load(void)
     if ((e = getenv("CLX_CAM_INVERT_Y"))) g_clx.cam_invert = *e == '1';
     if ((e = getenv("CLX_BUBBLE"))) g_clx.bubble_wide = strncmp(e, "classic", 7) != 0;
     if ((e = getenv("CLX_RUMBLE_DAMAGE"))) g_clx.rumble_damage = *e == '1';
+    if ((e = getenv("CLX_RUMBLE_HIT"))) g_clx.rumble_hit = *e == '1';
     g_clx.fps_osd = on(getenv("RECOMP_FPS_OSD"));
     if ((e = getenv("RECOMP_AUDIO_VOLUME"))) g_clx.volume = atoi(e);
     if (g_clx.volume < 0 || g_clx.volume > 100) g_clx.volume = 100;
