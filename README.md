@@ -179,6 +179,21 @@ One `key=value` per line in `clx_options.txt` (Switch: `sdmc:/switch/clx/`; PC: 
 
 More in [Troubleshooting](docs/troubleshooting.md).
 
+## Testing: what to send with a bug report
+
+This is a test build. If something goes wrong on a Switch, please send these four files from
+`sdmc:/switch/clx/` on the microSD card:
+
+| File | What it is |
+|---|---|
+| `clx_log_vk.txt` | the log of the last run (`clx_log.txt` if you ran the OpenGL app) |
+| `clx_log_vk.prev.txt` | the log of the run before it (a crash is often in this one) |
+| `clx_options.txt` | your settings |
+| `clx_env.txt` | the advanced switches |
+
+Also say the version shown in hbmenu (for example `0.54.257ded-vk`), where in the game it
+happened, and what you did just before. Please do not send game files.
+
 ## FAQ
 
 **Do the downloads include the game?** No. They have no game data (no disc files, textures or

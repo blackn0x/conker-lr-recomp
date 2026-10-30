@@ -793,7 +793,61 @@ void sub_00355430(void)
     ring[n & 63][1] = node;
     ring[n & 63][2] = link;
     n++;
-    if ((!guest_ram(link) || !guest_ram(link + 0x100)) && told < 3) {
+    /* The descent in 0x00355B40 (return 0x00355C91) takes the child 0x00354610
+     * picked: array base + index * 0x20 (it returns ecx = base). Index -1 means
+     * "no nearest child": every squared distance was NaN or >= FLT_MAX, or the
+     * parent has no children. The title then writes [0] (its own crash) and
+     * every walker that follows reads garbage: the worm crash (issues #2, #4).
+     * Layout (0x20 bytes): +0 x y z r, +0x10 child array, +0x14 count, +0x15
+     * level. Frame: parent at esp+0x44, the item's sphere at esp+0x94. */
+    if (ret == 0x00355C91u) {
+        uint32_t par = MEM32(esp + 0x44), base = 0, cnt = 0, lvl = 0;
+        if (guest_ram(par) && guest_ram(par + 0x20)) {
+            base = MEM32(par + 0x10);
+            cnt = MEM8(par + 0x14);
+            lvl = MEM8(par + 0x15);
+        }
+        if (node == base - 0x20u) {
+            float it[4] = { MEMF(esp + 0x94), MEMF(esp + 0x98), MEMF(esp + 0x9C), MEMF(esp + 0xA0) };
+            uint32_t c, finite = 0;
+            static int fix = -1;
+            /* The first 6 are reported in full; the fix below applies every time
+             * (the console's 0.52 crashed on the first one; later ones must not). */
+            int say = told < 6;
+            told++;
+            if (say)
+            fprintf(stderr, "[node] no nearest child: parent 0x%08X level %u count %u base 0x%08X, item %g %g %g %g (%s)\n",
+                    par, lvl, cnt, base, (double)it[0], (double)it[1], (double)it[2], (double)it[3],
+                    (it[0] == it[0] && it[1] == it[1] && it[2] == it[2]) ? "finite or inf" : "NaN");
+            for (c = 0; say && c < cnt && c < 8 && guest_ram(base) && guest_ram(base + 0x120); c++) {
+                float x = MEMF(base + c * 0x20) - it[0], y = MEMF(base + c * 0x20 + 4) - it[1],
+                      z = MEMF(base + c * 0x20 + 8) - it[2], d = x * x + y * y + z * z;
+                fprintf(stderr, "[node]   child %u: %g %g %g %g level %u count %u d2 %g\n", c,
+                        (double)MEMF(base + c * 0x20), (double)MEMF(base + c * 0x20 + 4),
+                        (double)MEMF(base + c * 0x20 + 8), (double)MEMF(base + c * 0x20 + 12),
+                        MEM8(base + c * 0x20 + 0x15), MEM8(base + c * 0x20 + 0x14), (double)d);
+                finite += d < 3.4028235e38f;
+            }
+            if (say)
+                fprintf(stderr, "[node]   children with a finite squared distance: %u of %u\n", finite, cnt);
+            if (fix < 0) {
+                const char *e = getenv("CLX_TREE_FIX");
+                fix = !(e && *e == '0');
+            }
+            /* With children and a valid array, take the first child instead of
+             * running into the title's own crash (the tree stays usable). */
+            if (fix && cnt > 0 && cnt <= 8 && guest_ram(base) && guest_ram(base + 0x120)) {
+                if (say)
+                    fprintf(stderr, "[node]   taking child 0 (CLX_TREE_FIX=0 to stop)\n");
+                node = base;
+                MEM32(esp + 4) = base;
+                edi = base;
+                link = MEM32(base + 0x10);
+            }
+            fflush(stderr);
+        }
+    }
+    if ((!guest_ram(link) || !guest_ram(link + 0x100)) && told < 6) {
         told++;
         fprintf(stderr, "[node] 0x00355430 from 0x%08X: node 0x%08X link 0x%08X (not RAM), call %u\n",
                 ret, node, link, n);
