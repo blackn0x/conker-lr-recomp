@@ -12,7 +12,7 @@
 #endif
 
 typedef struct {
-    volatile int aspect169;      /* 1 = Hor+ 16:9 */
+    volatile int aspect;         /* 0 = 4:3, 1 = Hor+ 16:9, 2 = Hor+ 21:9 */
     volatile int fps60;          /* 1 = 60 Hz (applied at the next start) */
     volatile int cam_free;       /* 1 = no swing back behind Conker */
     volatile int cam_invert;     /* 1 = right stick's vertical axis flipped */
@@ -24,6 +24,8 @@ typedef struct {
     volatile int aniso;          /* 1..16 (Vulkan) */
     volatile int fxaa;           /* (Vulkan) */
     volatile int glyphs;         /* button icons: 0 Xbox, 1 Switch, 2 PlayStation */
+    volatile int rumble_damage;  /* 1 = the pad rumbles when Conker is hurt (clx_rumble.c) */
+    volatile int rumble_hit;     /* 1 = a short rumble when Conker hits something (clx_rumble.c) */
 } ClxSettings;
 
 extern ClxSettings g_clx;
@@ -34,6 +36,9 @@ void clx_options_load(void);
 /* Writes the menu's keys back to clx_options.txt, keeping every other line. */
 int clx_options_save(void);
 const char *clx_options_path(void);
+/* The aspect setting: "4:3" / "16:9" / "21:9", and its width / height. */
+const char *clx_aspect_name(int aspect);
+float clx_aspect_ratio(int aspect);
 /* PC: bind "key_<control>" or "pad_<control>" (sdl_keys.h names) and keep
  * it for the next save; reset: default keys and pad buttons, none saved. */
 int clx_bind(const char *name, const char *value);
@@ -47,7 +52,11 @@ void clx_buttons_hook(unsigned int va, unsigned int color, unsigned int w, unsig
  * (clx_menu.c; NULL hides it; nothing while the menu is open). */
 void clx_prompt(const char *text, unsigned ms);
 
-/* The in-game menu (clx_menu.c): usb_gamepad_hook. */
+/* The in-game menu (clx_menu.c), called from clx_pad_hook. */
 void clx_menu_hook(unsigned char *report, unsigned host_buttons);
+
+/* usb_gamepad_hook (clx_rumble.c): the damage rumble, then the menu where
+ * there is one. */
+void clx_pad_hook(unsigned char *report, unsigned host_buttons);
 
 #endif

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build Conker: Live & Reloaded from your own default.xbe: for the Nintendo
-# Switch, for Linux, or for Windows.
+# Switch, for Linux, for Windows, or for Android.
 #
 #   ./build_from_xbe.sh /path/to/default.xbe
 #
@@ -16,6 +16,8 @@
 #   linux    Linux x86-64: out/linux/ (clx, clx.sh, clx_options.txt)
 #   windows  Windows x64, in an MSYS2 UCRT64 shell: out/windows/
 #            (see build_from_xbe.ps1 and the README)
+#   android  Android arm64 (Vulkan): out/android/clx.apk. Needs the Android
+#            SDK, NDK r27 and JDK 17 (android/README.md)
 #
 # Output:
 #   out/sdmc/switch/clx/   Switch: *.nro, clx_env.txt, clx_options.txt
@@ -23,6 +25,7 @@
 #                          switch/clx/game/)
 #   out/linux/             Linux package
 #   out/windows/           Windows package
+#   out/android/           Android APK (clx.apk) and symbols/ for crash reports
 #   out/work/              lifted C, build dirs (re-used next time)
 #
 # What this builds contains code generated from your XBE: do not share it.
@@ -52,7 +55,7 @@ has() { case " $VARIANTS " in *" $1 "*) return 0;; esac; return 1; }
 
 [ $# -eq 1 ] || fail "usage: $0 /path/to/default.xbe"
 [ -f "$1" ] || fail "no file $1"
-for v in $VARIANTS; do case $v in vulkan|gl|linux|windows) ;; *) fail "unknown variant $v";; esac; done
+for v in $VARIANTS; do case $v in vulkan|gl|linux|windows|android) ;; *) fail "unknown variant $v";; esac; done
 sum=$(sha1sum "$1" | cut -d' ' -f1)
 [ "$sum" = "$XBE_SHA1" ] || fail "$1 has SHA-1 $sum; this port needs the retail NTSC default.xbe ($XBE_SHA1)"
 
@@ -77,6 +80,13 @@ if has windows; then
     [ "${MSYSTEM:-}" = "UCRT64" ] || fail "windows: run this in an MSYS2 UCRT64 shell (README: Windows)"
     command -v clang >/dev/null || fail "clang not found (pacman -S mingw-w64-ucrt-x86_64-clang)"
     pkg-config --exists sdl2 || fail "SDL2 not found (pacman -S mingw-w64-ucrt-x86_64-SDL2)"
+fi
+if has android; then
+    ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"
+    [ -d "$ANDROID_HOME/ndk/27.2.12479018" ] || fail "Android NDK r27 not found in $ANDROID_HOME (android/README.md)"
+    [ -n "${JAVA_HOME:-}" ] && export PATH="$JAVA_HOME/bin:$PATH"
+    command -v javac >/dev/null || fail "javac not found: JDK 17 (android/README.md)"
+    command -v curl >/dev/null || fail "curl not found (fetches SDL2 and glslang)"
 fi
 
 if [ -z "${JOBS:-}" ]; then
@@ -153,6 +163,18 @@ if has linux; then
     step "Linux output: $DEST"
     ls -l "$DEST"
     echo "Run: $DEST/clx.sh /path/to/unpacked/disc"
+fi
+
+# ── Android ─────────────────────────────────────────────────────
+if has android; then
+    step "building the Android APK (~40 min)"
+    OUT="$OUT" WORK="$WORK" NFSU2_GEN_DIR="$WORK/gen" JOBS="$JOBS" ANDROID_HOME="$ANDROID_HOME" \
+        bash "$REPO/android/build.sh"
+    step "Android output: $OUT/android"
+    ls -l "$OUT/android"
+    echo "Install: adb install -r $OUT/android/clx.apk"
+    echo "Copy your unpacked disc to /sdcard/ConkerLR/game/ on the phone."
+    echo "Logs: /sdcard/Download/ConkerLR-logs/"
 fi
 
 # ── Windows (MSYS2 UCRT64) ──────────────────────────────────────

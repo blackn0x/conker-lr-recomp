@@ -4374,6 +4374,7 @@ static void trap_deliver_hooked(volatile uint32_t *nv, uint32_t method,
     ULONGLONG give_up = GetTickCount64() + 2000;
     static unsigned handled_n;
     uint64_t t0 = trap_now_ns();
+    int stall_dumped = 0;
 
     xbox_Nv2aHoldInterrupts(1);        /* the ack thread leaves PGRAPH alone */
     while (InterlockedCompareExchange(&s_trap_lock, 1, 0) != 0)
@@ -4403,6 +4404,10 @@ static void trap_deliver_hooked(volatile uint32_t *nv, uint32_t method,
                     "(PMC_INTR %08X EN %08X)\n", param, nv[0x100 / 4],
                     nv[0x140 / 4]);
             give_up = GetTickCount64() + 2000;
+            if (!stall_dumped++) {      /* who is holding the ISR off */
+                extern void xbox_IrqlDumpHolders(void);
+                xbox_IrqlDumpHolders();
+            }
         }
         WaitForSingleObject(driver_event(), 1);
     }
@@ -4512,6 +4517,7 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
         volatile uint32_t *nv = (volatile uint32_t *)
             ((uint8_t *)xbox_GetMemoryOffset() + 0xFD000000u);
         ULONGLONG give_up = GetTickCount64() + 2000;
+        int stall_dumped = 0;
 
         {   /* RECOMP_TRAP_STATS=1: NOP trap parameters per 10 s (above 0xFFFF
              * by low byte, shown as 800000xx). */
@@ -4580,6 +4586,10 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
                         "(PMC_INTR %08X EN %08X)\n", param, nv[0x100 / 4],
                         nv[0x140 / 4]);
                 give_up = GetTickCount64() + 2000;
+                if (!stall_dumped++) {  /* who is holding the ISR off */
+                    extern void xbox_IrqlDumpHolders(void);
+                    xbox_IrqlDumpHolders();
+                }
             }
             Sleep(0);
         }

@@ -82,6 +82,28 @@ static void *g_mirror_views[XBOX_NUM_MIRRORS] = {0};
  * question. */
 static void *g_span_base = NULL;
 static size_t g_span_size = 0;
+
+/* POSIX hosts reserve the whole 4 GB guest window, not just base + mirrors:
+ * the apertures (0x80000000 contiguous, 0xF0000000 tiled, 0xFD000000 NV2A,
+ * 0xFE800000 MCPX, 0xFF000000 flash) sit at fixed offsets from the base too,
+ * and only the reservation guarantees them. Desktop Linux leaves that space
+ * free by luck; Android does not -- its ART heap and libraries land right
+ * above the mirrors, every aperture failed with error 8, and Conker faulted
+ * on its first read of the kernel PE header at 0x8001003C.
+ * Not on Windows, where MEM_RELEASE cannot split a reservation. */
+#if !defined(_WIN32) && !defined(__SWITCH__)
+#define XBOX_SPAN_WHOLE_WINDOW 1
+#endif
+
+/* Hand the slice [native, native + size) back from the span so a fixed-address
+ * mapping can take it. No-op outside the span (or with no span). */
+static void span_take(uintptr_t native, size_t size)
+{
+    uintptr_t lo = (uintptr_t)g_span_base;
+
+    if (g_span_base && native >= lo && native + size <= lo + g_span_size)
+        VirtualFree((LPVOID)native, size, MEM_RELEASE);
+}
 static void *g_tiled_view = NULL;
 
 /* Contiguous / physical memory window (see MemoryLayoutInit).
@@ -2331,6 +2353,10 @@ BOOL xbox_MemoryLayoutInit(const void *xbe_data, size_t xbe_size)
          * VirtualFree releases just the slice about to be used, so each view
          * replaces our own reservation rather than racing for free space. */
         g_span_size = g_memory_size * (size_t)(1 + XBOX_NUM_MIRRORS);
+#ifdef XBOX_SPAN_WHOLE_WINDOW
+        if (g_span_size < ((size_t)1 << 32))
+            g_span_size = (size_t)1 << 32;
+#endif
         g_span_base = VirtualAlloc(NULL, g_span_size, MEM_RESERVE, PAGE_NOACCESS);
         if (g_span_base) {
             VirtualFree(g_span_base, g_memory_size, MEM_RELEASE);
@@ -2812,6 +2838,7 @@ BOOL xbox_MemoryLayoutInit(const void *xbe_data, size_t xbe_size)
      */
     {
         uintptr_t contig_native = XBOX_CONTIG_BASE + g_memory_offset;
+        span_take(contig_native, XBOX_CONTIG_SIZE);
         g_contig_mapping = CreateFileMappingW(
             INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
             0, (DWORD)XBOX_CONTIG_SIZE, NULL);
@@ -2857,6 +2884,7 @@ BOOL xbox_MemoryLayoutInit(const void *xbe_data, size_t xbe_size)
      */
     {
         uintptr_t nv2a_native = XBOX_NV2A_BASE + g_memory_offset;
+        span_take(nv2a_native, XBOX_NV2A_SIZE);
         g_nv2a_memory = VirtualAlloc(
             (LPVOID)nv2a_native,
             XBOX_NV2A_SIZE,
@@ -2902,6 +2930,7 @@ BOOL xbox_MemoryLayoutInit(const void *xbe_data, size_t xbe_size)
      */
     {
         uintptr_t mcpx_native = XBOX_MCPX_BASE + g_memory_offset;
+        span_take(mcpx_native, XBOX_MCPX_SIZE);
         g_mcpx_memory = VirtualAlloc(
             (LPVOID)mcpx_native,
             XBOX_MCPX_SIZE,
@@ -2999,6 +3028,7 @@ BOOL xbox_MemoryLayoutInit(const void *xbe_data, size_t xbe_size)
     /* Flash ROM aperture -- see XBOX_FLASH_BASE for why. */
     {
         uintptr_t flash_native = XBOX_FLASH_BASE + g_memory_offset;
+        span_take(flash_native, XBOX_FLASH_SIZE);
 
         g_flash_memory = VirtualAlloc(
             (LPVOID)flash_native,
@@ -3035,6 +3065,8 @@ BOOL xbox_MemoryLayoutInit(const void *xbe_data, size_t xbe_size)
         #define XBOX_KERNEL_BASE 0x80010000u
         #define KERNEL_PAGE_SIZE 4096
         uintptr_t kernel_native = XBOX_KERNEL_BASE + g_memory_offset;
+        if (!g_contig_memory)
+            span_take(kernel_native, KERNEL_PAGE_SIZE);
         /* Already committed if the contiguous window above succeeded -
          * 0x80010000 sits inside it - so just use that storage. */
         g_kernel_memory = g_contig_memory
@@ -3227,8 +3259,11 @@ BOOL xbox_MemoryLayoutInit(const void *xbe_data, size_t xbe_size)
             tiled_size = XBOX_CONTIG_SIZE;
         /* RECOMP_NO_TILED=1: leave it unmapped, as on the Switch, so that
          * any access through it outside the fold faults (a test switch). */
-        g_tiled_view = g_contig_mapping
-                       && !(getenv("RECOMP_NO_TILED") && *getenv("RECOMP_NO_TILED") == '1')
+        int map_tiled = g_contig_mapping
+                        && !(getenv("RECOMP_NO_TILED") && *getenv("RECOMP_NO_TILED") == '1');
+        if (map_tiled)
+            span_take(tiled_native, tiled_size);
+        g_tiled_view = map_tiled
             ? MapViewOfFileEx(
                 g_contig_mapping,
                 FILE_MAP_ALL_ACCESS,
@@ -4004,6 +4039,28 @@ uint32_t xbox_HeapBlockSize(uint32_t xbox_va)
     }
     ReleaseSRWLockShared(&g_heap_lock);
     return r;
+}
+
+/* Bytes in live heap blocks and blocks of 1 MB or more, for a periodic
+ * report: a heap that keeps growing over a session is a leak, and the big
+ * blocks are the guest's own heap segments. */
+uint32_t xbox_HeapLiveBytes(uint32_t *big_blocks)
+{
+    uint32_t live = 0, big = 0;
+    int i;
+
+    AcquireSRWLockShared(&g_heap_lock);
+    for (i = 0; i < g_heap_block_count; i++) {
+        if (g_heap_blocks[i].free)
+            continue;
+        live += g_heap_blocks[i].size;
+        if (g_heap_blocks[i].size >= 0x100000)
+            big++;
+    }
+    ReleaseSRWLockShared(&g_heap_lock);
+    if (big_blocks)
+        *big_blocks = big;
+    return live;
 }
 
 void xbox_HeapFree(uint32_t xbox_va)

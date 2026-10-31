@@ -766,6 +766,67 @@ void sub_0004FF00(void)
     MEM32(pad + 0xA0) = l;
 }
 
+/* ── NaN points kept out of the collision tree (Windmill freeze) ──
+ *
+ * 0x00355B40 (stdcall, arg 0 = tree) drains a queue of 32-byte entries
+ * (tree+0x30 base, tree+0x34 count; a point xyzw at +0) into a tree, each
+ * one descending from the root to the child nearest its point (0x00354610).
+ * A point with a NaN is nearest to nothing: 0x00354610 hits the title's
+ * *(int*)0 = 1 assert -- a crash on the Xbox, a no-op here -- and returns
+ * the entry before the child array, and the descent loops on it forever,
+ * the picture frozen at full CPU. On Android a point in Windmill turns NaN
+ * ~5 s after the worm cutscene starts (xyz NaN, w 212.0) whether or not it
+ * is skipped; where the NaN comes from is not found yet. Such a point is
+ * put at the origin instead, and logged. */
+extern void sub_00355B40_gen(void);
+
+volatile unsigned g_clx_nan_fixes;              /* android.c's [mem] line */
+
+void sub_00355B40(void)
+{
+    static unsigned reported;
+    uint32_t tree = MEM32(esp + 4);
+    uint32_t base = MEM32(tree + 0x30), n = MEM32(tree + 0x34), i, k;
+
+    for (i = 0; i < n && i < 4096; i++) {
+        uint32_t e = base + i * 0x20;
+        float x = MEMF(e), y = MEMF(e + 4), z = MEMF(e + 8), w = MEMF(e + 12);
+        if (x == x && y == y && z == z && w == w)
+            continue;
+        g_clx_nan_fixes++;
+        if (reported < 8) {
+            reported++;
+            fprintf(stderr, "[nan] collision tree %08X entry %u/%u: point %08X %08X %08X %08X,"
+                            " +10 %08X +14 %08X, called from %08X; put at the origin\n",
+                    tree, i, n, MEM32(e), MEM32(e + 4), MEM32(e + 8), MEM32(e + 12),
+                    MEM32(e + 0x10), MEM32(e + 0x14), MEM32(esp));
+            if (reported == 1) {
+                /* The tree and the object the entry names, to find the field
+                 * that went NaN and from it the code that writes it. */
+                uint32_t objs[2] = { tree, MEM32(e + 0x10) }, o, j;
+                for (o = 0; o < 2; o++) {
+                    if (objs[o] < 0x10000 || objs[o] >= 0x04000000)
+                        continue;
+                    for (j = 0; j < 0x100; j += 0x20)
+                        fprintf(stderr, "[nan]   %08X+%02X: %08X %08X %08X %08X %08X %08X %08X %08X\n",
+                                objs[o], j, MEM32(objs[o] + j), MEM32(objs[o] + j + 4),
+                                MEM32(objs[o] + j + 8), MEM32(objs[o] + j + 12),
+                                MEM32(objs[o] + j + 16), MEM32(objs[o] + j + 20),
+                                MEM32(objs[o] + j + 24), MEM32(objs[o] + j + 28));
+                }
+                for (j = 0; j < 0x400; j += 4) {
+                    uint32_t v = MEM32(esp + j);
+                    if (v >= 0x00011000 && v < 0x0048CF40)
+                        fprintf(stderr, "[nan]   stack +%03X: %08X\n", j, v);
+                }
+            }
+        }
+        for (k = 0; k < 4; k++)
+            MEMF(e + k * 4) = 0.0f;
+    }
+    sub_00355B40_gen();
+}
+
 /* ── Diagnostics for 0.62's crash: a tree node with a garbage link ───────
  *
  * 0x00355430 (cdecl: node, value) reads [node+0x10] and then [that+0x100];
@@ -1299,7 +1360,7 @@ void sub_002A78D0(void)
     sub_002A78D0_gen();
 }
 
-/* ── Hor+ 16:9 (CLX_ASPECT=16:9, aspect=16:9 in clx_options.txt) ──
+/* ── Hor+ 16:9 / 21:9 (CLX_ASPECT, aspect= in clx_options.txt) ──
  *
  * Conker renders 4:3 only (see main.c). 0x003FB030 (ecx = a camera context;
  * [0x0084B868] is the current one) rebuilds the context's projection every
@@ -1309,11 +1370,12 @@ void sub_002A78D0(void)
  * 4/3 x 10/11), near +0x10C, far +0x110. The projection goes to +0x90 and
  * the frustum planes (0x003FAE90, the culling) come from the same
  * parameters. For a full-screen 640x480 perspective context the wrapper
- * multiplies the aspect by 4/3 for the call only: the projection and the
- * culling both widen (Hor+: same vertical view, more to the sides), and the
- * game's own logic keeps reading the 4:3 aspect. The renderer presents the
- * 640x480 surfaces at 16:9 with square pixels (RECOMP_WIDESCREEN=1, set by
- * main.c with CLX_ASPECT=16:9). 2D (HUD, menus, movies) stays full width,
+ * multiplies the aspect by the wide ratio over 4:3 (4/3 for 16:9, 7/4 for
+ * 21:9) for the call only: the projection and the culling both widen (Hor+:
+ * same vertical view, more to the sides), and the game's own logic keeps
+ * reading the 4:3 aspect. The renderer presents the 640x480 surfaces at the
+ * wide aspect with square pixels (RECOMP_WIDESCREEN=1 and xbox_wide_ratio,
+ * set by main.c from CLX_ASPECT). 2D (HUD, menus, movies) stays full width,
  * so it is stretched. Same idea as antoxa2584x's NFSU1 0.2 "Hor+ 16:9"
  * (their game layer: ideas only); Conker's addresses found with a RAM search
  * for projection matrices, gdb access watchpoints and the disassembly. */
@@ -1322,8 +1384,10 @@ extern void sub_003FB030_gen(void);
 void sub_003FB030(void)
 {
     static int shown = -1, persist = -1;
-    static struct { uint32_t ctx; float mine; } tab[16];
-    int horplus = g_clx.aspect169;      /* aspect= / CLX_ASPECT; the menu changes it */
+    /* Per widened context: the game's own aspect and the value we wrote. */
+    static struct { uint32_t ctx; float game, mine; } tab[16];
+    int mode = g_clx.aspect;            /* aspect= / CLX_ASPECT; the menu changes it */
+    float k = clx_aspect_ratio(mode) * 0.75f;
     uint32_t c = ecx;
     float a;
 
@@ -1331,31 +1395,32 @@ void sub_003FB030(void)
         const char *e = getenv("CLX_HORPLUS_PERSIST");
         persist = !(e && *e == '0');
     }
-    if (shown != horplus) {
-        shown = horplus;
-        fprintf(stderr, "[aspect] %s\n", horplus ? "16:9 Hor+" : "4:3");
+    if (shown != mode) {
+        shown = mode;
+        fprintf(stderr, "[aspect] %s%s\n", clx_aspect_name(mode), mode ? " Hor+" : "");
     }
-    if (!horplus && c && persist) {
+    if (!mode && c && persist) {
         /* Back to 4:3: a context this wrapper widened gets the game's aspect
          * again (the value it holds is still ours), and leaves the table. */
         int i;
         for (i = 0; i < 16; i++)
             if (tab[i].ctx == c) {
                 if (MEMF(c + 0x108) == tab[i].mine)
-                    MEMF(c + 0x108) = tab[i].mine * 0.75f;
+                    MEMF(c + 0x108) = tab[i].game;
                 tab[i].ctx = 0;
                 break;
             }
     }
-    if (!horplus || !c || (MEM8(c + 8) & 3)
+    if (!mode || !c || (MEM8(c + 8) & 3)
             || MEMF(c + 0xDC) != 640.0f || MEMF(c + 0xE0) != 480.0f) {
         sub_003FB030_gen();
         return;
     }
     if (persist) {
         /* Keep the widened aspect in the context, so code that reads it
-         * outside this call (culling) sees 16:9 too. A small table of the
-         * values we wrote: widen only an aspect the game set itself. */
+         * outside this call (culling) sees it too. A small table of the
+         * values we wrote: widen only an aspect the game set itself, and
+         * rewiden from the game's value when the menu changes 16:9 / 21:9. */
         int i, slot = -1;
         a = MEMF(c + 0x108);
         for (i = 0; i < 16; i++)
@@ -1366,15 +1431,17 @@ void sub_003FB030(void)
             tab[slot].ctx = c;
             tab[slot].mine = 0.0f;
         }
-        if (a != tab[slot].mine) {
-            tab[slot].mine = a * (4.0f / 3.0f);
+        if (a != tab[slot].mine)
+            tab[slot].game = a;
+        if (a != tab[slot].game * k) {
+            tab[slot].mine = tab[slot].game * k;
             MEMF(c + 0x108) = tab[slot].mine;
         }
         sub_003FB030_gen();
         return;
     }
     a = MEMF(c + 0x108);
-    MEMF(c + 0x108) = a * (4.0f / 3.0f);
+    MEMF(c + 0x108) = a * k;
     sub_003FB030_gen();
     MEMF(c + 0x108) = a;
 }

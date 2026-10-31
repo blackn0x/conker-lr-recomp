@@ -1,0 +1,158 @@
+name: Build
+
+# Builds the port from your own default.xbe and uploads the result as workflow artifacts.
+#
+# IMPORTANT: the build output contains code generated from the game. Artifacts of a PUBLIC
+# repository can be downloaded by anyone with a GitHub account, so every job below is skipped
+# unless the repository is PRIVATE. Run this in a private copy (not a public fork).
+#
+# One-time setup (Settings -> Secrets and variables -> Actions -> New repository secret):
+#   CLX_XBE_URL   a direct download URL of your retail NTSC default.xbe that the runner can
+#                 fetch (a private release asset, a pre-signed S3/GCS URL, ...).
+#                 build_from_xbe.sh checks the SHA-1 and stops if it is not the right file.
+#
+# Run it from the Actions tab -> Build -> Run workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      linux:
+        description: "Build Linux x86-64"
+        type: boolean
+        default: true
+      windows:
+        description: "Build Windows x64"
+        type: boolean
+        default: true
+      switch:
+        description: "Build Nintendo Switch (Docker image + NVK, 1.5 h or more)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  CLX_XBE_URL: ${{ secrets.CLX_XBE_URL }}
+
+jobs:
+  linux:
+    if: ${{ github.event.repository.private && inputs.linux }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build \
+            pkg-config git python3-pip libsdl2-dev libssl-dev libepoxy-dev
+          pip3 install --break-system-packages capstone==5.0.7 Pillow
+
+      - name: Download default.xbe
+        run: |
+          test -n "$CLX_XBE_URL" || { echo "::error::secret CLX_XBE_URL is not set"; exit 1; }
+          curl -fL --retry 3 -o "$RUNNER_TEMP/default.xbe" "$CLX_XBE_URL"
+
+      - name: Build
+        run: VARIANTS=linux ./build_from_xbe.sh "$RUNNER_TEMP/default.xbe"
+
+      - name: Package
+        run: tar -C out -czf clx-linux-x86_64.tar.gz linux
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clx-linux-x86_64
+          path: clx-linux-x86_64.tar.gz
+          retention-days: 7
+          if-no-files-found: error
+
+  windows:
+    if: ${{ github.event.repository.private && inputs.windows }}
+    runs-on: windows-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            git
+            curl
+            mingw-w64-ucrt-x86_64-clang
+            mingw-w64-ucrt-x86_64-SDL2
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-python-pillow
+            mingw-w64-ucrt-x86_64-python-capstone
+
+      - name: Download default.xbe
+        run: |
+          test -n "$CLX_XBE_URL" || { echo "::error::secret CLX_XBE_URL is not set"; exit 1; }
+          curl -fL --retry 3 -o /tmp/default.xbe "$CLX_XBE_URL"
+
+      - name: Build
+        run: VARIANTS=windows ./build_from_xbe.sh /tmp/default.xbe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clx-windows-x64
+          path: out/windows
+          retention-days: 7
+          if-no-files-found: error
+
+  switch:
+    if: ${{ github.event.repository.private && inputs.switch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the build image (devkitPro, NVK, glslang)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: clx-build
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Download default.xbe
+        run: |
+          test -n "$CLX_XBE_URL" || { echo "::error::secret CLX_XBE_URL is not set"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/xbe"
+          curl -fL --retry 3 -o "$RUNNER_TEMP/xbe/default.xbe" "$CLX_XBE_URL"
+
+      - name: Build the NROs
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "$PWD:/src" -v "$RUNNER_TEMP/xbe:/xbe:ro" \
+            clx-build ./build_from_xbe.sh /xbe/default.xbe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clx-switch-sdcard
+          path: out/sdmc
+          retention-days: 7
+          if-no-files-found: error

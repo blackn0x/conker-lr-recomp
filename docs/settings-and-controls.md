@@ -21,7 +21,7 @@ While the menu is open, the game gets no input. It keeps running: a cutscene goe
 | Line | Values | Takes effect |
 |---|---|---|
 | Controller (PC) | pad 1's name, or NONE ("plug in or pair a pad"); left/right make the next pad pad 1 | at once |
-| Aspect | 4:3, 16:9 (Hor+: a wider view; HUD stretched) | at once |
+| Aspect | 4:3, 16:9, 21:9 (Hor+: a wider view; HUD stretched) | at once |
 | Frame rate | 30, 60 (60 is experimental) | after a restart |
 | Camera | classic, free (no swing back behind Conker) | at once |
 | Invert camera up/down | off, on | at once |
@@ -62,7 +62,7 @@ The menu saves its values here. You can also edit the file with a text editor. O
 
 | Key | Values | Meaning |
 |---|---|---|
-| `aspect` | `4:3`, `16:9` | Picture shape. 16:9 is a wider view, not a stretch. |
+| `aspect` | `4:3`, `16:9`, `21:9` | Picture shape. 16:9 and 21:9 are a wider view, not a stretch. |
 | `fps` | `30`, `60` | Frame rate. 60 is experimental. Needs a restart. |
 | `camera` | `classic`, `free` | `free`: no automatic swing behind Conker. |
 | `camera_invert_y` | `0`, `1` | Flip the right stick up/down. `camera_invert` is the same key. |
@@ -75,6 +75,8 @@ The menu saves its values here. You can also edit the file with a text editor. O
 | `aniso` | `1`, `2`, `4`, `8`, `16` | Anisotropic filtering (Vulkan build). |
 | `fxaa` | `0`, `1` | FXAA (Vulkan build). |
 | `button_glyphs` | `switch`, `xbox`, `ps` | Button icons in the game (default: Switch on the Switch, Xbox on a PC). |
+| `rumble_damage` | `0`, `1` | The pad rumbles when Conker is hurt (default on). The game itself rumbles only for a few scripted events; this adds hits and falls. The game's own Vibration setting also turns it off. |
+| `rumble_hit` | `0`, `1` | A short rumble when Conker's weapon hits an enemy, a stronger one when it finishes it (default on). The game's Vibration setting also turns it off. |
 | `key_<control>` | a key name | PC keyboard binding. See below. |
 | `pad_<control>` | a pad input | PC gamepad binding. See below. |
 

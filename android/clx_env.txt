@@ -1,0 +1,34 @@
+# clx_env.txt -- KEY=VALUE per line, '#' comments. Lives in /sdcard/ConkerLR/.
+# Every setting is listed in the log as "[android] env KEY=VALUE".
+# The log of each start is in Download/ConkerLR-logs/<date_time>/clx_log.txt.
+
+# Vulkan: recording on its own thread, present on a worker thread (the
+# Switch's defaults; on a desktop they are off). 0 turns one off.
+RECOMP_VK_THREAD=1
+RECOMP_VK_ASYNC_PRESENT=1
+RECOMP_VK_KICK=300
+# Guest lock handed over by guest priority. 0 = FIFO with 1 ms grace.
+RECOMP_GIL_EAGER=1
+
+# More in the log, for a bug report: periodic lines (0 = all of them) and
+# one "[ft]" frame-cost line per second.
+RECOMP_QUIET=1
+#RECOMP_FRAME_STATS=1
+# A crash inside the GPU driver: name every step of the first N draws.
+#RECOMP_VK_TRACE=200
+
+# Off-screen draw culling in the executor (an NFSU2 speed-up); off for Conker.
+RECOMP_CULL=0
+
+# Boot movie: 1 = skip it, 0 = play it.
+CLX_SKIP_INTRO=0
+# Cutscenes: press = START, A or L skips one; 0 = the title's own rules.
+CLX_SKIP_CUTSCENES=press
+# Title menu: 1 = the cursor starts on Game 1 (single player).
+CLX_START_SINGLE=1
+#RECOMP_FPS_OSD=1
+# Rumble: with the touch controls the phone vibrates; 0 = only a controller.
+#CLX_PHONE_RUMBLE=0
+# Rumble test: 5 s after start, pad 1 (or the phone) rumbles for 1 s, and
+# the log says what vibrated ("[rumble test]" lines).
+#CLX_RUMBLE_TEST=1

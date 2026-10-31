@@ -33,6 +33,7 @@
 /* Nonzero when the title was told the TV is 16:9 (kernel_xbox.c): present
  * the logical surface at 16:9 instead of 4:3. */
 int xbox_video_widescreen(void);
+extern volatile float xbox_wide_ratio;   /* kernel_xbox.c: 16/9 by default */
 
 typedef struct {
     uint32_t color_va;          /* guest address of pixel (0,0) */

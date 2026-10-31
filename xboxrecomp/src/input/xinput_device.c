@@ -260,6 +260,12 @@ DWORD xbox_InputGetCapabilities(DWORD dwPort, DWORD dwFlags, XBOX_INPUT_CAPABILI
 static SDL_GameController *g_pads[XBOX_MAX_CONTROLLERS];
 static BOOL  g_controller_connected[XBOX_MAX_CONTROLLERS];
 static DWORD g_packet[XBOX_MAX_CONTROLLERS];
+#if !defined(__SWITCH__)
+/* Pads past the four ports, open so a press can claim pad 1. */
+#define SPARE_PADS 8
+static SDL_GameController *g_spare[SPARE_PADS];
+static BOOL g_pad_used[XBOX_MAX_CONTROLLERS];   /* pressed since it got its port */
+#endif
 
 /* Open up to XBOX_MAX_CONTROLLERS attached game controllers. */
 static void open_controllers(void)
@@ -300,6 +306,11 @@ static void refresh_controllers(void)
             g_pads[slot] = NULL;
             g_controller_connected[slot] = FALSE;
         }
+    for (j = 0; j < SPARE_PADS; j++)
+        if (g_spare[j] && !SDL_GameControllerGetAttached(g_spare[j])) {
+            SDL_GameControllerClose(g_spare[j]);
+            g_spare[j] = NULL;
+        }
     for (i = 0; i < SDL_NumJoysticks(); i++) {
         SDL_JoystickID id;
         int open = 0;
@@ -311,15 +322,69 @@ static void refresh_controllers(void)
                 open = 1;
         if (open)
             continue;
+        for (j = 0; j < SPARE_PADS; j++)
+            if (g_spare[j] && SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(g_spare[j])) == id)
+                open = 1;
+        if (open)
+            continue;
         for (slot = 0; slot < XBOX_MAX_CONTROLLERS && g_pads[slot]; slot++) { }
-        if (slot == XBOX_MAX_CONTROLLERS)
-            break;
+        if (slot == XBOX_MAX_CONTROLLERS) {
+            /* Ports full: open it as a spare, so a press can claim pad 1. */
+            for (j = 0; j < SPARE_PADS && g_spare[j]; j++) { }
+            if (j < SPARE_PADS && (g_spare[j] = SDL_GameControllerOpen(i)))
+                fprintf(stderr, "  [PAD] spare: %s\n", SDL_GameControllerName(g_spare[j]));
+            continue;
+        }
         if ((g_pads[slot] = SDL_GameControllerOpen(i))) {
             g_controller_connected[slot] = TRUE;
+            g_pad_used[slot] = FALSE;
             fprintf(stderr, "  [PAD] controller %d: %s\n", slot + 1,
                     SDL_GameControllerName(g_pads[slot]));
         }
     }
+}
+
+static BOOL pad_pressed(SDL_GameController *c)
+{
+    int b;
+    for (b = 0; b < SDL_CONTROLLER_BUTTON_MAX; b++)
+        if (SDL_GameControllerGetButton(c, (SDL_GameControllerButton)b))
+            return TRUE;
+    return SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > 16000
+        || SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > 16000;
+}
+
+/* Pad 1 is the first pad in SDL's order, which can be one that is never
+ * used (a streaming host's virtual pads, listed before the real one).
+ * While pad 1 has pressed nothing, the first pad that presses a button
+ * takes its place. */
+static void pad_follow_press(void)
+{
+    SDL_GameController *t;
+    int k;
+    for (k = 0; k < XBOX_MAX_CONTROLLERS; k++)
+        if (g_pads[k] && !g_pad_used[k] && pad_pressed(g_pads[k]))
+            g_pad_used[k] = TRUE;
+    if (g_pads[0] && g_pad_used[0])
+        return;
+    for (k = 1; k < XBOX_MAX_CONTROLLERS; k++)
+        if (g_pads[k] && g_pad_used[k]) {
+            t = g_pads[0]; g_pads[0] = g_pads[k]; g_pads[k] = t;
+            g_pad_used[k] = FALSE;
+            g_pad_used[0] = TRUE;
+            g_controller_connected[k] = g_pads[k] != NULL;
+            g_controller_connected[0] = TRUE;
+            fprintf(stderr, "  [PAD] controller 1 is now %s\n", SDL_GameControllerName(g_pads[0]));
+            return;
+        }
+    for (k = 0; k < SPARE_PADS; k++)
+        if (g_spare[k] && pad_pressed(g_spare[k])) {
+            t = g_pads[0]; g_pads[0] = g_spare[k]; g_spare[k] = t;
+            g_pad_used[0] = TRUE;
+            g_controller_connected[0] = TRUE;
+            fprintf(stderr, "  [PAD] controller 1 is now %s\n", SDL_GameControllerName(g_pads[0]));
+            return;
+        }
 }
 #endif
 
@@ -461,6 +526,64 @@ int xbox_pad_poll_new(char *out, int n)
     return 1;
 }
 
+#if defined(__ANDROID__)
+/* The on-screen controls (src/android.c), on top of pad 1 like the keyboard. */
+void android_touch_apply(unsigned short *wButtons, unsigned char analog[8], short thumbs[4]);
+
+static void touch_apply(XBOX_INPUT_STATE *s)
+{
+    short th[4] = { s->Gamepad.sThumbLX, s->Gamepad.sThumbLY,
+                    s->Gamepad.sThumbRX, s->Gamepad.sThumbRY };
+    unsigned short w = s->Gamepad.wButtons;
+
+    android_touch_apply(&w, s->Gamepad.bAnalogButtons, th);
+    s->Gamepad.wButtons = w;
+    s->Gamepad.sThumbLX = th[0];
+    s->Gamepad.sThumbLY = th[1];
+    s->Gamepad.sThumbRX = th[2];
+    s->Gamepad.sThumbRY = th[3];
+}
+#else
+#define touch_apply(s) ((void)0)
+#endif
+
+#if !defined(__SWITCH__)
+/* CLX_RUMBLE_TEST=1: five seconds after the first poll, pad 1 rumbles at
+ * full strength for a second through the game's own path
+ * (xbox_InputSetState), and the log says which way it went. It tells a
+ * controller or phone that cannot rumble from a game that never asks. */
+static int s_rumble_test_log;
+
+static void rumble_test_tick(void)
+{
+    static int state = -1;      /* -1 unread, 0 off or done, 1 waiting, 2 on */
+    static Uint32 t0;
+    Uint32 now = SDL_GetTicks();
+    XBOX_VIBRATION v;
+
+    if (state < 0) {
+        const char *e = getenv("CLX_RUMBLE_TEST");
+        state = (e && *e && *e != '0') ? 1 : 0;
+        t0 = now;
+    }
+    if (state == 1 && now - t0 >= 5000) {
+        fprintf(stderr, "  [rumble test] pad 1 on: %s\n",
+                g_pads[0] ? SDL_GameControllerName(g_pads[0]) : "no SDL controller");
+        v.wLeftMotorSpeed = v.wRightMotorSpeed = 0xFFFF;
+        s_rumble_test_log = 1;
+        xbox_InputSetState(0, &v);
+        state = 2;
+        t0 = now;
+    } else if (state == 2 && now - t0 >= 1000) {
+        v.wLeftMotorSpeed = v.wRightMotorSpeed = 0;
+        xbox_InputSetState(0, &v);
+        s_rumble_test_log = 0;
+        fprintf(stderr, "  [rumble test] pad 1 off\n");
+        state = 0;
+    }
+}
+#endif
+
 DWORD xbox_InputGetState(DWORD dwPort, XBOX_INPUT_STATE *pState)
 {
     if (dwPort >= XBOX_MAX_CONTROLLERS || !pState)
@@ -501,6 +624,8 @@ DWORD xbox_InputGetState(DWORD dwPort, XBOX_INPUT_STATE *pState)
             last = now;
             refresh_controllers();
         }
+        pad_follow_press();
+        rumble_test_tick();
     }
 #endif
     SDL_GameController *c = g_pads[dwPort];
@@ -513,6 +638,7 @@ DWORD xbox_InputGetState(DWORD dwPort, XBOX_INPUT_STATE *pState)
             const Uint8 *ks = SDL_GetKeyboardState(&n);
             if (ks)
                 xbox_keys_apply(ks, n, pState);
+            touch_apply(pState);
             g_controller_connected[0] = TRUE;
             pState->dwPacketNumber = ++g_packet[0];
             return ERROR_SUCCESS;
@@ -557,6 +683,7 @@ DWORD xbox_InputGetState(DWORD dwPort, XBOX_INPUT_STATE *pState)
         const Uint8 *ks = SDL_GetKeyboardState(&n);
         if (ks)
             xbox_keys_apply(ks, n, pState);
+        touch_apply(pState);
     }
 #endif
 
@@ -575,13 +702,34 @@ DWORD xbox_InputSetState(DWORD dwPort, const XBOX_VIBRATION *pVibration)
     return ERROR_SUCCESS;
 #else
     SDL_GameController *c = g_pads[dwPort];
-    if (!c) return ERROR_DEVICE_NOT_CONNECTED;
 
-    /* SDL rumble needs a duration; refresh for ~1s on each call (the game
-     * polls vibration continuously). */
-    SDL_GameControllerRumble(c, pVibration->wLeftMotorSpeed,
-                             pVibration->wRightMotorSpeed, 1000);
-    return ERROR_SUCCESS;
+    /* SDL rumble needs a duration. The USB pad model passes changes only
+     * (usb_gamepad_output), so a rumble lasts until the next call -- SDL's
+     * longest; zero speeds stop it. This was 1 s, which cut every longer
+     * rumble short. */
+    if (c) {
+        int r = SDL_GameControllerRumble(c, pVibration->wLeftMotorSpeed,
+                                         pVibration->wRightMotorSpeed, 0xFFFF);
+        if (s_rumble_test_log)
+            fprintf(stderr, "  [rumble test] SDL rumble: %s\n",
+                    r == 0 ? "accepted" : SDL_GetError());
+        if (r == 0)
+            return ERROR_SUCCESS;
+    }
+#if defined(__ANDROID__)
+    /* SDL has no rumble for Android's own joysticks; Rumble.java does it,
+     * and vibrates the phone for pad 1 on the touch controls. */
+    {
+        extern const char *android_rumble(int port, unsigned low, unsigned high);
+        const char *how = android_rumble((int)dwPort, pVibration->wLeftMotorSpeed,
+                                         pVibration->wRightMotorSpeed);
+        if (s_rumble_test_log)
+            fprintf(stderr, "  [rumble test] Rumble.java: %s\n", how);
+        return ERROR_SUCCESS;
+    }
+#else
+    return c ? ERROR_SUCCESS : ERROR_DEVICE_NOT_CONNECTED;
+#endif
 #endif
 }
 

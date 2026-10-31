@@ -11,6 +11,10 @@
 #else
 #include <pthread.h>
 #endif
+#if defined(__ANDROID__)
+#include <dlfcn.h>
+#include <unistd.h>
+#endif
 
 static const char *const k_tname[FS_T_N] = { "game", "exec", "rec", "pres" };
 
@@ -66,9 +70,18 @@ static int thread_cpu_ns(int i, uint64_t *ns)
     return 1;
 }
 
+#if defined(__ANDROID__)
+static void hint_thread(int which);
+#endif
+
 void fs_thread(int which)
 {
-    if (!fs_on() || which < 0 || which >= FS_T_N)
+    if (which < 0 || which >= FS_T_N)
+        return;
+#if defined(__ANDROID__)
+    hint_thread(which);
+#endif
+    if (!fs_on())
         return;
 #if defined(__SWITCH__)
     s_t[which].h = threadGetCurHandle();
@@ -80,16 +93,178 @@ void fs_thread(int which)
     thread_cpu_ns(which, &s_t[which].last);
 }
 
+static uint64_t s_last_gpu;          /* the newest frame's GPU span, for the hint */
+
 void fs_add(int stat, uint64_t ns)
 {
     if (stat < 0 || stat >= FS_N)
         return;
+    if (stat == FS_GPU)
+        s_last_gpu = ns;
     /* ponytail: plain adds from up to two threads; a lost update skews one
      * second's average a little, not worth atomics on the hot path. */
     s_sum[stat] += ns;
     if (ns > s_max[stat])
         s_max[stat] = ns;
 }
+
+/* ── Android: ADPF performance hints ──────────────────────────────────
+ *
+ * Android gives an app no say over CPU or GPU clocks; the governors pick
+ * them from load, and a frame that is short of work for a moment makes them
+ * step down, after which the next busy frame misses 16.7 ms. A performance
+ * hint session (API 33) tells the system the frame budget and, every frame,
+ * how long the work took; it raises the clocks of the session's threads to
+ * keep inside the budget. From API 35 the report carries the GPU time too
+ * (AWorkDuration), which is what lets it raise the GPU clock as well.
+ *
+ * The threads are the ones fs_thread() names (game, exec, rec, pres). The
+ * CPU time reported is the busiest one's own CPU time over the frame (the
+ * critical path, waits left out); the GPU time is the renderer's timestamp
+ * span (fs_want_gpu turns those on). RECOMP_PERF_HINT=0 turns it off. All
+ * symbols come from dlsym, so older Androids just go without. */
+#if defined(__ANDROID__)
+typedef struct APerformanceHintManager APerformanceHintManager;
+typedef struct APerformanceHintSession APerformanceHintSession;
+typedef struct AWorkDuration AWorkDuration;
+
+static struct {
+    APerformanceHintManager *(*get_manager)(void);
+    APerformanceHintSession *(*create)(APerformanceHintManager *, const int32_t *, size_t, int64_t);
+    int (*update_target)(APerformanceHintSession *, int64_t);
+    int (*report)(APerformanceHintSession *, int64_t);
+    int (*set_threads)(APerformanceHintSession *, const pid_t *, size_t);
+    AWorkDuration *(*wd_create)(void);
+    void (*wd_start)(AWorkDuration *, int64_t);
+    void (*wd_total)(AWorkDuration *, int64_t);
+    void (*wd_cpu)(AWorkDuration *, int64_t);
+    void (*wd_gpu)(AWorkDuration *, int64_t);
+    int (*report2)(APerformanceHintSession *, AWorkDuration *);
+} s_ph;
+
+static int s_hint_on = -1;
+static int s_hint_fps = 60;
+static pid_t s_hint_tid[FS_T_N];
+static clockid_t s_hint_clk[FS_T_N];
+static uint64_t s_hint_last[FS_T_N];
+static volatile int s_hint_threads_changed;
+static APerformanceHintSession *s_hint;
+static AWorkDuration *s_hint_wd;
+
+static int hint_on(void)
+{
+    if (s_hint_on < 0) {
+        const char *e = getenv("RECOMP_PERF_HINT");
+        void *lib;
+        s_hint_on = 0;
+        if (e && *e == '0')
+            return 0;
+        lib = dlopen("libandroid.so", RTLD_NOW);
+        if (!lib)
+            return 0;
+#define PH_SYM(field, name) *(void **)&s_ph.field = dlsym(lib, name)
+        PH_SYM(get_manager, "APerformanceHint_getManager");
+        PH_SYM(create, "APerformanceHint_createSession");
+        PH_SYM(update_target, "APerformanceHint_updateTargetWorkDuration");
+        PH_SYM(report, "APerformanceHint_reportActualWorkDuration");
+        PH_SYM(set_threads, "APerformanceHint_setThreads");
+        PH_SYM(wd_create, "AWorkDuration_create");
+        PH_SYM(wd_start, "AWorkDuration_setWorkPeriodStartTimestampNanos");
+        PH_SYM(wd_total, "AWorkDuration_setActualTotalDurationNanos");
+        PH_SYM(wd_cpu, "AWorkDuration_setActualCpuDurationNanos");
+        PH_SYM(wd_gpu, "AWorkDuration_setActualGpuDurationNanos");
+        PH_SYM(report2, "APerformanceHint_reportActualWorkDuration2");
+#undef PH_SYM
+        s_hint_on = s_ph.get_manager && s_ph.create && s_ph.report && s_ph.update_target;
+        if (!(s_ph.wd_create && s_ph.wd_start && s_ph.wd_total && s_ph.wd_cpu && s_ph.wd_gpu
+              && s_ph.report2))
+            s_ph.report2 = NULL;
+        fprintf(stderr, "[perf] performance hints %s\n", !s_hint_on ? "unavailable (API < 33)"
+                : s_ph.report2 ? "on, CPU and GPU" : "on, CPU only (API < 35)");
+    }
+    return s_hint_on;
+}
+
+static void hint_thread(int which)
+{
+    if (!hint_on() || pthread_getcpuclockid(pthread_self(), &s_hint_clk[which]))
+        return;
+    s_hint_tid[which] = gettid();
+    __atomic_store_n(&s_hint_threads_changed, 1, __ATOMIC_RELEASE);
+}
+
+int fs_want_gpu(void)
+{
+    return fs_on() || hint_on();
+}
+
+void fs_target_fps(int fps)
+{
+    if (fps > 0)
+        s_hint_fps = fps;
+    if (s_hint)
+        s_ph.update_target(s_hint, 1000000000ll / s_hint_fps);
+}
+
+/* Once per presented frame. */
+static void hint_frame(uint64_t now, uint64_t frame_start)
+{
+    pid_t tids[FS_T_N];
+    size_t n = 0;
+    uint64_t cpu = 0, gpu = s_last_gpu, total;
+    int i;
+
+    if (!hint_on())
+        return;
+    if (__atomic_exchange_n(&s_hint_threads_changed, 0, __ATOMIC_ACQ_REL)) {
+        for (i = 0; i < FS_T_N; i++)
+            if (s_hint_tid[i])
+                tids[n++] = s_hint_tid[i];
+        if (!n)
+            return;
+        if (!s_hint) {
+            s_hint = s_ph.create(s_ph.get_manager(), tids, n, 1000000000ll / s_hint_fps);
+            if (!s_hint) {
+                fprintf(stderr, "[perf] no hint session (the system refused it)\n");
+                s_hint_on = 0;
+                return;
+            }
+            if (s_ph.report2)
+                s_hint_wd = s_ph.wd_create();
+            fprintf(stderr, "[perf] hint session: %zu threads, %d fps target\n", n, s_hint_fps);
+        } else if (s_ph.set_threads) {
+            s_ph.set_threads(s_hint, tids, n);
+        }
+    }
+    if (!s_hint)
+        return;
+    for (i = 0; i < FS_T_N; i++) {
+        struct timespec ts;
+        uint64_t t;
+        if (!s_hint_tid[i] || clock_gettime(s_hint_clk[i], &ts))
+            continue;
+        t = (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+        if (s_hint_last[i] && t - s_hint_last[i] > cpu)
+            cpu = t - s_hint_last[i];
+        s_hint_last[i] = t;
+    }
+    if (!cpu)
+        return;
+    total = cpu > gpu ? cpu : gpu;
+    if (s_hint_wd && gpu) {
+        s_ph.wd_start(s_hint_wd, (int64_t)frame_start);
+        s_ph.wd_total(s_hint_wd, (int64_t)total);
+        s_ph.wd_cpu(s_hint_wd, (int64_t)cpu);
+        s_ph.wd_gpu(s_hint_wd, (int64_t)gpu);
+        s_ph.report2(s_hint, s_hint_wd);
+    } else {
+        s_ph.report(s_hint, (int64_t)cpu);
+    }
+}
+#else
+int fs_want_gpu(void) { return fs_on(); }
+void fs_target_fps(int fps) { (void)fps; }
+#endif
 
 void fs_frame(unsigned draws, unsigned programs, unsigned textures)
 {
@@ -99,6 +274,15 @@ void fs_frame(unsigned draws, unsigned programs, unsigned textures)
     char line[512];
     int len, i;
 
+#if defined(__ANDROID__)
+    {
+        static uint64_t hint_last;
+        uint64_t t = mono_ns();
+        if (hint_last)
+            hint_frame(t, hint_last);
+        hint_last = t;
+    }
+#endif
     if (!fs_on())
         return;
     now = mono_ns();

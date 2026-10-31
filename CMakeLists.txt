@@ -3,8 +3,9 @@ cmake_minimum_required(VERSION 3.20)
 # ============================================================================
 # Conker: Live & Reloaded (Xbox, Rare 2005) - Static Recompilation
 #
-# Hosts: Windows (MSVC, D3D11), Linux (GCC, SDL2 + OpenGL) and Nintendo
-# Switch homebrew (devkitA64 + libnx, built with switch/build.sh).
+# Hosts: Windows (MSVC, D3D11), Linux (GCC, SDL2 + OpenGL), Nintendo
+# Switch homebrew (devkitA64 + libnx, built with switch/build.sh) and
+# Android arm64 (NDK, SDL2 + Vulkan, built with android/build.sh).
 # ============================================================================
 
 project(clx_recomp C)
@@ -52,11 +53,22 @@ set(GAME_SOURCES
     src/switch_saltynx.c
     src/clx_options.c
     src/clx_menu.c
+    src/clx_rumble.c
     src/clx_buttons.c
     src/clx_mouse.c
 )
 
-if(MSVC)
+if(ANDROID)
+    # SDLActivity loads libmain.so and calls its SDL_main (src/android.c).
+    list(APPEND GAME_SOURCES src/android.c)
+    add_library(${PROJECT_NAME} SHARED ${GAME_SOURCES} ${RECOMP_GEN_SOURCES})
+    set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME main)
+    target_link_libraries(${PROJECT_NAME} PRIVATE log android dl)
+    # No undefined symbols left for the loader to find at run time; segments
+    # aligned for phones with 16 KB pages.
+    target_link_options(${PROJECT_NAME} PRIVATE "LINKER:--no-undefined"
+                        "LINKER:-z,max-page-size=16384")
+elseif(MSVC)
     add_executable(${PROJECT_NAME} WIN32 ${GAME_SOURCES} ${RECOMP_GEN_SOURCES})
 else()
     add_executable(${PROJECT_NAME} ${GAME_SOURCES} ${RECOMP_GEN_SOURCES})
@@ -113,8 +125,8 @@ endif()
 if(NOT MSVC)
     # The generated chunks are huge straight-line functions; -O1 keeps GCC's
     # memory and time per chunk sane while still allocating registers. The
-    # Switch's CPU is the bottleneck there, so it gets -O2.
-    if(NINTENDO_SWITCH)
+    # Switch's and a phone's CPU is the bottleneck there, so they get -O2.
+    if(NINTENDO_SWITCH OR ANDROID)
         set(NFSU2_GEN_OPT "-O2" CACHE STRING "Optimisation for the lifted code")
     else()
         set(NFSU2_GEN_OPT "-O1" CACHE STRING "Optimisation for the lifted code")

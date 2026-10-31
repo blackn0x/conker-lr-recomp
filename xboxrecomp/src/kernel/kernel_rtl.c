@@ -506,6 +506,8 @@ static void xbox_cs_clear_owner(CRITICAL_SECTION* cs)
     }
 }
 
+int  xbox_dispatch_lend(void);                       /* kernel_hal.c */
+void xbox_dispatch_reclaim(int lent);
 /* Held guest locks and the threads waiting for one (stall report). */
 void xbox_cs_dump(void)
 {
@@ -582,9 +584,20 @@ VOID __stdcall xbox_RtlEnterCriticalSection(PRTL_CRITICAL_SECTION CriticalSectio
         fflush(stderr);
     }
     {
-        int w = cs_wait_begin((uint32_t)((uintptr_t)CriticalSection - (uintptr_t)g_xbox_mem_offset));
+        /* A raised caller lends the dispatch lock while it waits, so the
+         * holder's ISRs and DPCs can run (kernel_hal.c). */
+        int lent = xbox_dispatch_lend();
+        static volatile LONG told;
+        int w;
+        if (lent && InterlockedIncrement(&told) == 1) {
+            fprintf(stderr, "  [IRQL] RtlEnterCriticalSection waits while raised:"
+                            " dispatch lock lent out\n");
+            fflush(stderr);
+        }
+        w = cs_wait_begin((uint32_t)((uintptr_t)CriticalSection - (uintptr_t)g_xbox_mem_offset));
         EnterCriticalSection(cs);
         cs_wait_end(w);
+        xbox_dispatch_reclaim(lent);
     }
     xbox_cs_note_owner(cs);
     if (g_cs_contention_reports <= 16) {

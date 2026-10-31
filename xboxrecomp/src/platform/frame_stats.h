@@ -19,6 +19,10 @@ enum { FS_GAME_WAIT, FS_GPU, FS_SLOT_WAIT, FS_ACQUIRE, FS_N };    /* times */
 int  fs_on(void);
 void fs_thread(int which);            /* the calling thread is `which` */
 void fs_add(int stat, uint64_t ns);
+/* GPU timestamps wanted: the [ft] line, or Android's performance hints. */
+int  fs_want_gpu(void);
+/* The frame rate the title runs at, the budget for the performance hints. */
+void fs_target_fps(int fps);
 /* Once per presented frame, from the renderer's flip. */
 void fs_frame(unsigned draws, unsigned programs, unsigned textures);
 
