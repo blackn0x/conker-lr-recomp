@@ -670,6 +670,10 @@ NTSTATUS __stdcall xbox_NtReadFile(
  * and the file offset they came from, so a port can patch game data as it
  * loads. NULL (the default) = no hook. */
 extern void (*xbox_file_read_hook)(void *buf, size_t len, int64_t offset);
+/* The last movie file (*.xmv) opened: a number that changes with each new
+ * one (0: none open) and, in *reads, the reads made on it so far
+ * (kernel_file.c). A movie streams while the count grows. */
+unsigned xbox_movie_state(unsigned *reads);
 
 NTSTATUS __stdcall xbox_NtWriteFile(
     HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext,

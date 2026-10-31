@@ -68,6 +68,39 @@ uint32_t xbox_LastFileError(void)
     return g_xbox_last_file_error;
 }
 
+/* The handle of the last movie file (*.xmv) opened and the reads made on it:
+ * a port can tell a movie that streams from one left open after it ended
+ * (Conker never closes its boot movie) and hold back a title's "skip the
+ * movie" press while one plays (kernel.h). One at a time: titles stream one. */
+static volatile HANDLE s_movie_handle;
+static volatile unsigned s_movie_reads, s_movie_id;
+
+unsigned xbox_movie_state(unsigned *reads)
+{
+    if (reads)
+        *reads = s_movie_reads;
+    return s_movie_handle ? s_movie_id : 0;
+}
+
+static void movie_opened(HANDLE h, const char *path, size_t n)
+{
+    if (n > 4 && (path[n - 4] == '.') && (path[n - 3] | 0x20) == 'x' && (path[n - 2] | 0x20) == 'm'
+            && (path[n - 1] | 0x20) == 'v') {
+        s_movie_handle = h;
+        s_movie_reads = 0;
+        s_movie_id++;
+        fprintf(stderr, "[movie] open %s\n", path);
+    }
+}
+
+static void movie_closed(HANDLE h)
+{
+    if (h && h == s_movie_handle) {
+        s_movie_handle = NULL;
+        fprintf(stderr, "[movie] closed\n");
+    }
+}
+
 #if defined(_WIN32)
 void xbox_dir_forget(HANDLE h);
 /* ====================  Win32 backend  =================================== */
@@ -223,6 +256,15 @@ NTSTATUS __stdcall xbox_NtCreateFile(
     }
 
     *FileHandle = h;
+    {
+        char a[MAX_PATH];
+        size_t n = 0;
+        while (win_path[n] && n < MAX_PATH - 1) {
+            a[n] = (char)win_path[n];
+            n++;
+        }
+        movie_opened(h, a, n);
+    }
     if (IoStatusBlock) {
         IoStatusBlock->Status = STATUS_SUCCESS;
         IoStatusBlock->Information = (CreateDisposition == XBOX_FILE_CREATE) ? 2 : 1;
@@ -244,6 +286,8 @@ NTSTATUS __stdcall xbox_NtReadFile(
     if (!IoStatusBlock)
         return STATUS_INVALID_PARAMETER;
 
+    if (FileHandle == s_movie_handle)
+        s_movie_reads++;
     if (ByteOffset && ByteOffset->QuadPart >= 0) {
         memset(&ov, 0, sizeof(ov));
         ov.Offset = ByteOffset->LowPart;
@@ -311,6 +355,7 @@ NTSTATUS __stdcall xbox_NtClose(HANDLE Handle)
 {
     XBOX_TRACE(XBOX_LOG_FILE, "NtClose(handle=%p)", Handle);
     if (Handle && Handle != INVALID_HANDLE_VALUE) {
+        movie_closed(Handle);
         xbox_dir_forget(Handle);
         CloseHandle(Handle);
         return STATUS_SUCCESS;
@@ -983,6 +1028,7 @@ NTSTATUS __stdcall xbox_NtCreateFile(
     }
 
     *FileHandle = w32_open_handle(fd, host_path);
+    movie_opened(*FileHandle, host_path, strlen(host_path));
     if (IoStatusBlock) {
         IoStatusBlock->Status = STATUS_SUCCESS;
         IoStatusBlock->Information = (CreateDisposition == XBOX_FILE_CREATE) ? 2 : 1;
@@ -1007,6 +1053,8 @@ NTSTATUS __stdcall xbox_NtReadFile(
         IoStatusBlock->Status = STATUS_INVALID_HANDLE;
         return STATUS_INVALID_HANDLE;
     }
+    if (FileHandle == s_movie_handle)
+        s_movie_reads++;
 
     int64_t pos = -1;
     if (ByteOffset && ByteOffset->QuadPart >= 0) {
@@ -1074,6 +1122,7 @@ NTSTATUS __stdcall xbox_NtClose(HANDLE Handle)
 {
     XBOX_TRACE(XBOX_LOG_FILE, "NtClose(handle=%p)", Handle);
     if (Handle && Handle != INVALID_HANDLE_VALUE) {
+        movie_closed(Handle);
         xbox_dir_forget(Handle);
         CloseHandle(Handle);
         return STATUS_SUCCESS;

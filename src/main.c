@@ -495,6 +495,10 @@ static int game_main(void)
      * (clx_menu.c, which also keeps it from the title); RECOMP_PAD_MASK=0
      * would give it back to the title. */
     setenv("RECOMP_PAD_MASK", "0x20", 0);
+    {
+        extern void clx_mouse_report(uint8_t *report);
+        usb_gamepad_mouse_hook = clx_mouse_report;
+    }
 #endif
     usb_gamepad_hook = clx_pad_hook;      /* damage rumble, the menu (clx_rumble.c) */
     /* button_glyphs (clx_buttons.c): the Xbox icon textures drawn in the

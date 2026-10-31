@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <stdatomic.h>
 
 #if CLX_PC_INPUT
 #include "input/sdl_keys.h"
@@ -24,6 +25,7 @@ extern volatile int nv2a_vk_fxaa, nv2a_vk_aniso;
 #endif
 extern volatile int xbox_widescreen;                 /* kernel_xbox.c */
 extern volatile float xbox_wide_ratio;
+unsigned xbox_movie_state(unsigned *reads);          /* kernel_file.c */
 void xa2_set_master_volume(float v);                 /* apu_xaudio2.c */
 void clx_scale_apply(void);                          /* switch_nx.c / here */
 
@@ -72,7 +74,10 @@ static const Item k_items[] = {
 #define NITEMS ((int)(sizeof k_items / sizeof k_items[0]))
 #define VIS 11                   /* lines shown at once; the list scrolls */
 
-static int s_open, s_sel, s_top, s_restart_note, s_armed, s_done;
+static atomic_int s_open;
+static int s_sel, s_top, s_restart_note, s_armed, s_done;
+
+int clx_menu_is_open(void) { return s_open; }
 
 #if CLX_PC_INPUT
 /* The remap wizard: one control after the other. The pad walks the first
@@ -157,6 +162,33 @@ static void step(int dir)
     k = (k + dir + it->n) % it->n;
     *it->val = it->v[k];
     apply(it);
+}
+
+/* clx_settings.h: a prompt line, hidden by clx_menu_hook when its time is
+ * up (the hook runs with every pad report). */
+static volatile unsigned s_prompt_until;
+static volatile int s_prompt_on;
+
+void clx_prompt(const char *text, unsigned ms)
+{
+    const uint32_t gold = OVL_RGBA(255, 210, 60, 255);
+    int w;
+    if (s_open)
+        return;
+    if (!text) {
+        if (s_prompt_on)
+            ovl_publish(0);
+        s_prompt_on = 0;
+        return;
+    }
+    w = ovl_text_width(2, text) + 32;
+    ovl_begin();
+    ovl_rect((OVL_W - w) / 2, OVL_H - 70, w, 30, OVL_RGBA(14, 16, 24, 225));
+    ovl_rect((OVL_W - w) / 2, OVL_H - 70, w, 2, gold);
+    ovl_text((OVL_W - w) / 2 + 16, OVL_H - 60, 2, gold, text);
+    ovl_publish(1);
+    s_prompt_until = now_ms() + ms;
+    s_prompt_on = 1;
 }
 
 static void close_menu(void)
@@ -324,6 +356,10 @@ void clx_menu_hook(unsigned char *r, unsigned host)
 
     if (!recomp_quit_hook)
         recomp_quit_hook = quit_hook;
+    if (s_prompt_on && !s_open && (int)(now - s_prompt_until) >= 0) {
+        s_prompt_on = 0;
+        ovl_publish(0);
+    }
     /* Pseudo-buttons from both sticks (a PC's arrow keys are the right
      * stick), A (analog 0) and B (analog 1). */
     if (ly > 16000 || ry > 16000) b |= 0x01;
@@ -335,6 +371,41 @@ void clx_menu_hook(unsigned char *r, unsigned host)
     edge = b & ~prev;
     prev = b;
     r[2] &= (unsigned char)~0x20;           /* BACK belongs to the menu */
+
+    /* Movies (XMV) end on A or START, the title's own skip; a stray press
+     * ended the boot movie. A movie plays while its file was read in the
+     * last 6 s (it streams about 1 MB every 2-3 s; Conker never closes it)
+     * and it was not skipped. The first press only asks (held back until
+     * released); the next one within 3 s goes through. */
+    if (!s_open) {
+        static unsigned asked_at, id_seen, reads_seen, read_at, skipped_id;
+        static int asked, holding;
+        unsigned reads, id = xbox_movie_state(&reads);
+        if (id != id_seen || reads != reads_seen) {
+            id_seen = id;
+            reads_seen = reads;
+            read_at = now;
+        }
+        if (id && id != skipped_id && (int)(now - read_at) < 6000 && (edge & (0x10 | 0x10000))) {
+            if (asked && (int)(now - asked_at) < 3000) {
+                asked = 0;
+                skipped_id = id;
+                clx_prompt(NULL, 0);
+            } else {
+                asked = 1;
+                asked_at = now;
+                holding = 1;
+                clx_prompt("SKIP THIS MOVIE?  PRESS AGAIN", 3000);
+                printf("[skip] movie: asked (press again to skip)\n");
+            }
+        }
+        if (holding && !(b & (0x10 | 0x10000)))
+            holding = 0;
+        if (holding) {
+            r[2] &= (unsigned char)~0x10;
+            r[4] = 0;
+        }
+    }
 
 #if CLX_PC_INPUT
     if (s_wiz) {
@@ -361,6 +432,7 @@ void clx_menu_hook(unsigned char *r, unsigned host)
         s_open = !s_open;
         if (s_open) {
             s_restart_note = s_armed = s_done = 0;
+            s_prompt_on = 0;
             paint();
             painted_at = now;
             printf("[menu] open\n");

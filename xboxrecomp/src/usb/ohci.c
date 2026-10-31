@@ -1090,8 +1090,11 @@ static void ohci_plug(OhciController *hc, unsigned d, int on)
     hc->reg[HcInterruptStatus / 4] |= INTR_RHSC;
 }
 
+void xbox_thread_name(const char *name);     /* kernel_bridge.c: the stall dump */
+
 static DWORD WINAPI ohci_thread(LPVOID unused)
 {
+    xbox_thread_name("USB");
     /* This thread calls recompiled code, so it needs what any thread running
      * recompiled code needs: its own TIB. The guest register set is already
      * thread-local and the ISR gets a worker stack, but fs:[0] is the SEH

@@ -16,6 +16,8 @@
  *   rumble_damage=1            the pad rumbles when Conker is hurt (the game only
  *                              rumbles for a few scripted events); 0 = off
  *   rumble_hit=1               a short rumble when Conker's weapon hits an enemy; 0 = off
+ *   fullscreen=borderless|window   borderless fullscreen on a PC (Alt+Enter/F11 toggles)
+ *   mouse=0|1                  native mouse camera (F8 toggles at run time)
  *   key_<control>=<key>        PC keyboard: the key for a pad control, SDL key names
  *                              (key_a=Space, key_rs_up=Up; controls in input/sdl_keys.h)
  *
@@ -141,6 +143,11 @@ void clx_options_load(void)
                 g_clx.glyphs = !strcmp(v, "xbox") ? 0 : !strcmp(v, "ps") ? 2 : 1;
             else if (!strcmp(line, "rumble_damage")) g_clx.rumble_damage = on(v);
             else if (!strcmp(line, "rumble_hit")) g_clx.rumble_hit = on(v);
+            else if (!strcmp(line, "fullscreen"))
+                setenv("CLX_BORDERLESS",
+                       (!strcmp(v, "borderless") || !strcmp(v, "fullscreen") || on(v)) ? "1" : "0", 0);
+            else if (!strcmp(line, "mouse"))
+                setenv("CLX_NATIVE_MOUSE", on(v) ? "1" : "0", 0);
 #if CLX_PC_INPUT
             else if ((!strncmp(line, "key_", 4) || !strncmp(line, "pad_", 4)) && !clx_bind(line, v))
                 fprintf(stderr, "[options] unknown binding %s=%s\n", line, v);

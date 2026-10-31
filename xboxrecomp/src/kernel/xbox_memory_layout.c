@@ -1337,8 +1337,11 @@ static void pvideo_tick(volatile uint32_t *regs)
     }
 }
 
+void xbox_thread_name(const char *name);     /* kernel_bridge.c: the stall dump */
+
 static DWORD WINAPI nv2a_ack_thread(LPVOID param)
 {
+    xbox_thread_name("GPU executor");
     extern void xbox_nx_pin_executor(void);   /* win32_compat.c: core 1 (Switch) */
     volatile uint32_t *regs = (volatile uint32_t *)param;
     xbox_nx_pin_executor();
@@ -2178,6 +2181,10 @@ static void watchdog_dump(const char *why)
         if (a < XBOX_STACK_BASE || a >= XBOX_STACK_TOP) break;
         fprintf(stderr, "    GS %08X %08X\n", a,
                 *(const uint32_t *)(mem + a));
+    }
+    {
+        void xbox_threads_dump(void);          /* kernel_bridge.c */
+        xbox_threads_dump();
     }
     fflush(stderr);
 }
@@ -3557,6 +3564,7 @@ uint32_t xbox_AllocThreadTib(void)
     memset(TIB_VA(thread_data), 0, g_tls_thread_size);
 
     *(uint32_t *)TIB_VA(tib + 0x00) = 0xFFFFFFFFu;   /* own SEH chain    */
+    *(uint8_t *)TIB_VA(tib + 0x24) = 0;              /* KPCR.Irql: a new thread is at PASSIVE */
     *(uint32_t *)TIB_VA(block)      = thread_data;   /* slot 0           */
     *(uint32_t *)TIB_VA(tib + 0x04) = block + total; /* fs:[4], see above*/
 

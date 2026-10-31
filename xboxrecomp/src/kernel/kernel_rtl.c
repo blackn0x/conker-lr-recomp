@@ -350,6 +350,43 @@ static void xbox_guest_backtrace(int depth)
 static LONG g_cs_contention_reports;
 static LONG g_cs_enters, g_cs_leaves;
 
+/* Threads blocked in a guest lock, and since when: a deadlock between guest
+ * threads (A holds X and waits for Y, B holds Y and waits for X, or the owner
+ * is itself stuck) shows here and in xbox_cs_dump, which the stall watch calls
+ * (switch_nx.c). */
+#define CS_WAITERS_MAX 16
+static struct { volatile LONG tid; volatile uint32_t va; volatile ULONGLONG since; }
+    g_cs_waiters[CS_WAITERS_MAX];
+
+static int cs_wait_begin(uint32_t va)
+{
+    int i;
+    for (i = 0; i < CS_WAITERS_MAX; i++)
+        if (InterlockedCompareExchange(&g_cs_waiters[i].tid, (LONG)GetCurrentThreadId(), 0) == 0) {
+            g_cs_waiters[i].va = va;
+            g_cs_waiters[i].since = GetTickCount64();
+            return i;
+        }
+    return -1;
+}
+
+static void cs_wait_end(int i)
+{
+    if (i >= 0)
+        g_cs_waiters[i].tid = 0;
+}
+
+/* 1 if some thread has waited for a guest lock longer than ms. */
+int xbox_cs_waiting_long(unsigned ms)
+{
+    ULONGLONG now = GetTickCount64();
+    int i;
+    for (i = 0; i < CS_WAITERS_MAX; i++)
+        if (g_cs_waiters[i].tid && now - g_cs_waiters[i].since >= ms)
+            return 1;
+    return 0;
+}
+
 /* Which CRT lock is this?
  *
  * MSVC keeps its internal locks in a table of {CRITICAL_SECTION*, refcount}
@@ -471,13 +508,47 @@ static void xbox_cs_clear_owner(CRITICAL_SECTION* cs)
 
 int  xbox_dispatch_lend(void);                       /* kernel_hal.c */
 void xbox_dispatch_reclaim(int lent);
+/* Held guest locks and the threads waiting for one (stall report). */
+void xbox_cs_dump(void)
+{
+    ULONGLONG now = GetTickCount64();
+    size_t i;
+    int k;
+    fprintf(stderr, "  [locks] guest locks held (address, owner thread, taken at guest, depth):\n");
+    for (i = 0; i < XBOX_CS_TABLE_SIZE; i++) {
+        XBOX_CS_SLOT* slot = &g_cs_table[i];
+        if (slot->key && slot->owner_tid && slot->depth > 0)
+            fprintf(stderr, "  [locks]   0x%08X  thread %lu  at 0x%08X  depth %ld\n",
+                    (uint32_t)(slot->key - (uintptr_t)g_xbox_mem_offset),
+                    (unsigned long)slot->owner_tid, slot->owner_site, (long)slot->depth);
+    }
+    for (k = 0; k < CS_WAITERS_MAX; k++)
+        if (g_cs_waiters[k].tid)
+            fprintf(stderr, "  [locks]   thread %ld waits for 0x%08X since %llu ms\n",
+                    (long)g_cs_waiters[k].tid, g_cs_waiters[k].va,
+                    (unsigned long long)(now - g_cs_waiters[k].since));
+}
+
+/* Guest locks taken while the thread is at DISPATCH or above: not done on the
+ * console (it cannot wait there), and the symptom of a guest that was shown
+ * IRQL 0 (see irql_mirror in kernel_hal.c). Counted and the first few named. */
+static volatile LONG g_cs_enters_raised;
+LONG xbox_cs_enters_raised(void) { return g_cs_enters_raised; }
 
 VOID __stdcall xbox_RtlEnterCriticalSection(PRTL_CRITICAL_SECTION CriticalSection)
 {
     CRITICAL_SECTION* cs = xbox_cs_shadow(CriticalSection);
+    extern KIRQL xbox_CurrentIrql(void);
     if (!cs)
         return;
     InterlockedIncrement(&g_cs_enters);
+    if (xbox_CurrentIrql() >= DISPATCH_LEVEL && InterlockedIncrement(&g_cs_enters_raised) <= 6) {
+        fprintf(stderr, "  [CS] guest lock 0x%08X taken at IRQL %d, thread %lu\n",
+                (uint32_t)((uintptr_t)CriticalSection - (uintptr_t)g_xbox_mem_offset),
+                (int)xbox_CurrentIrql(), (unsigned long)GetCurrentThreadId());
+        xbox_guest_backtrace(6);
+        fflush(stderr);
+    }
     crt_lock_trace("take", CriticalSection);
     if (TryEnterCriticalSection(cs)) {
         xbox_cs_note_owner(cs);
@@ -517,12 +588,15 @@ VOID __stdcall xbox_RtlEnterCriticalSection(PRTL_CRITICAL_SECTION CriticalSectio
          * holder's ISRs and DPCs can run (kernel_hal.c). */
         int lent = xbox_dispatch_lend();
         static volatile LONG told;
+        int w;
         if (lent && InterlockedIncrement(&told) == 1) {
             fprintf(stderr, "  [IRQL] RtlEnterCriticalSection waits while raised:"
                             " dispatch lock lent out\n");
             fflush(stderr);
         }
+        w = cs_wait_begin((uint32_t)((uintptr_t)CriticalSection - (uintptr_t)g_xbox_mem_offset));
         EnterCriticalSection(cs);
+        cs_wait_end(w);
         xbox_dispatch_reclaim(lent);
     }
     xbox_cs_note_owner(cs);

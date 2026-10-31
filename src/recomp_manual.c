@@ -32,6 +32,7 @@
 #include "recomp_funcs.h"
 #include "platform/frame_stats.h"
 #include "clx_settings.h"
+#include "clx_mouse.h"
 
 /* ── ICALL trace ring buffer ───────────────────────────────── */
 
@@ -669,26 +670,37 @@ void sub_00045730(void)
  * set = all watched), never one the script marks unskippable (0x007655F7),
  * in scene 0x1D only cutscene 5, in scene 0x18 never cutscene 1 (the
  * opening's throne room), and in scene 0x21 only START after 5 s. The
- * wrapper lifts all of them for the call: every cutscene skips with L, START
- * or A, as the N64 port's "Skip Cutscenes: All".
- *   CLX_SKIP_CUTSCENES unset or =press: skip on a press (Switch default;
- *     unset is off elsewhere)
- *   CLX_SKIP_CUTSCENES=1: every cutscene ends as soon as it starts
+ * wrapper lifts the rest for the call: a cutscene skips with L, START or A.
+ * The unskippable mark stays unless asked (as the N64 mod's default): the
+ * script sets it for cutscenes that set up the game, and skipping one in the
+ * opening left a node with a garbage link (crash in 0x00355430, 0.62).
+ *   CLX_SKIP_CUTSCENES unset or =press: skip on a press, not the marked ones
+ *     (Switch default; unset is off elsewhere)
+ *   CLX_SKIP_CUTSCENES=all: skip on a press, the marked ones too
+ *   CLX_SKIP_CUTSCENES=1: every cutscene ends as soon as it starts (marked too)
  *   CLX_SKIP_CUTSCENES=0: the title's own rules */
 extern void sub_0004FF00_gen(void);
 
 void sub_0004FF00(void)
 {
     static int on = -1;                         /* 0 off, 1 on a press, 2 always */
-    uint32_t pad, l, scene, cut;
+    static int lift;                            /* also the unskippable ones */
+    static uint32_t told = ~0u;
+    static unsigned armed_at;
+    static int armed;
+    unsigned t;
+    int go;
+    uint32_t pad, l, scene;
     uint8_t seen, blocked;
 
     if (on < 0) {
         const char *e = getenv("CLX_SKIP_CUTSCENES");
         if (e && *e == '1')
-            on = 2;
+            on = 2, lift = 1;
         else if (e && *e == '0')
             on = 0;
+        else if (e && strcmp(e, "all") == 0)
+            on = 1, lift = 1;
         else if (e && strcmp(e, "press") == 0)
             on = 1;
         else
@@ -697,8 +709,9 @@ void sub_0004FF00(void)
 #else
             on = 0;
 #endif
-        fprintf(stderr, "[skip] cutscenes: %s\n", on == 2 ? "skipped at once (CLX_SKIP_CUTSCENES=1)"
-                : on ? "L, START or A skips" : "the title's own rules");
+        fprintf(stderr, "[skip] cutscenes: %s%s\n", on == 2 ? "skipped at once (CLX_SKIP_CUTSCENES=1)"
+                : on ? "L, START or A skips" : "the title's own rules",
+                on && !lift ? ", not the ones the script marks unskippable" : "");
     }
     if (!on) {
         sub_0004FF00_gen();
@@ -709,19 +722,44 @@ void sub_0004FF00(void)
     scene = MEM32(0x007FA1F8u);
     seen = MEM8(0x007655E9u);
     blocked = MEM8(0x007655F7u);
-    cut = MEM8(0x0076F0DCu + edi);
     /* The player's raw pressed bits (START 0x10, A 0x100, L 0x4000):
      * 0x0004D320 copies L to pad+0xA0 only while 0x008471A0 is clear. */
-    if (on == 2 || (MEM32(MEM32(MEM32(0x008470FCu) + 8) + 8) & 0x4110))
+    /* A press asks first ("SKIP THIS CUTSCENE? PRESS AGAIN", 3 s); the
+     * next press within that time skips (a stray A no longer ends one). */
+    go = on == 2;
+    if (on == 1 && (MEM32(MEM32(MEM32(0x008470FCu) + 8) + 8) & 0x4110)) {
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        t = (unsigned)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+        if (blocked && !lift) {
+            if (told != (scene << 8 | MEM8(0x0076F0DCu + edi))) {
+                told = scene << 8 | MEM8(0x0076F0DCu + edi);
+                fprintf(stderr, "[skip] cutscene %u in scene 0x%X is marked unskippable: it plays on\n",
+                        MEM8(0x0076F0DCu + edi), scene);
+            }
+        } else if (armed && (int)(t - armed_at) < 3000) {
+            go = 1;
+            armed = 0;
+            clx_prompt(NULL, 0);
+        } else {
+            armed = 1;
+            armed_at = t;
+            clx_prompt("SKIP THIS CUTSCENE?  PRESS AGAIN", 3000);
+            fprintf(stderr, "[skip] cutscene %u in scene 0x%X: asked (press again to skip)\n",
+                    MEM8(0x0076F0DCu + edi), scene);
+        }
+    }
+    if (go)
         MEM32(pad + 0xA0) = l | 0x4000;
     MEM8(0x007655E9u) = 1;
-    MEM8(0x007655F7u) = 0;
+    if (lift)
+        MEM8(0x007655F7u) = 0;
     if ((scene == 0x1D && !MEM8(0x008497F9u)) || scene == 0x21 || scene == 0x18)
         MEM32(0x007FA1F8u) = 0;
     sub_0004FF00_gen();
     if (eax)
-        fprintf(stderr, "[skip] cutscene %u (slot %u) in scene 0x%X skipped (watched before %u)\n",
-                cut, edi, scene, seen);
+        fprintf(stderr, "[skip] cutscene %u (slot %u) in scene 0x%X skipped%s\n",
+                MEM8(0x0076F0DCu + edi), edi, scene, blocked ? " (marked unskippable)" : "");
     MEM32(0x007FA1F8u) = scene;
     MEM8(0x007655F7u) = blocked;
     MEM8(0x007655E9u) = seen;
@@ -787,6 +825,152 @@ void sub_00355B40(void)
             MEMF(e + k * 4) = 0.0f;
     }
     sub_00355B40_gen();
+}
+
+/* ── Diagnostics for 0.62's crash: a tree node with a garbage link ───────
+ *
+ * 0x00355430 (cdecl: node, value) reads [node+0x10] and then [that+0x100];
+ * its caller (0x00355C40..0x00355C9D) walks a tree with 0x00354610. On the
+ * console a link of 0x0B7D1D84 faulted (on the Xbox and Linux that address is
+ * a RAM mirror and reads garbage). The wrapper keeps the last 64 calls
+ * (caller, node, link) and, when a link is outside RAM, logs the node's
+ * words, the calls and the stack before the call goes on (and faults). */
+extern void sub_00355430_gen(void);
+
+static int guest_ram(uint32_t a)
+{
+    return (a >= 0x00010000u && a < 0x04000000u) || (a >= 0x80000000u && a < 0x84000000u);
+}
+
+void sub_00355430(void)
+{
+    static uint32_t ring[64][3];
+    static unsigned n, told;
+    uint32_t ret = MEM32(esp), node = MEM32(esp + 4), link = 0, i, k;
+
+    if (guest_ram(node) && guest_ram(node + 0x3C))
+        link = MEM32(node + 0x10);
+    ring[n & 63][0] = ret;
+    ring[n & 63][1] = node;
+    ring[n & 63][2] = link;
+    n++;
+    /* The descent in 0x00355B40 (return 0x00355C91) takes the child 0x00354610
+     * picked: array base + index * 0x20 (it returns ecx = base). Index -1 means
+     * "no nearest child": every squared distance was NaN or >= FLT_MAX, or the
+     * parent has no children. The title then writes [0] (its own crash) and
+     * every walker that follows reads garbage: the worm crash (issues #2, #4).
+     * Layout (0x20 bytes): +0 x y z r, +0x10 child array, +0x14 count, +0x15
+     * level. Frame: parent at esp+0x44, the item's sphere at esp+0x94. */
+    if (ret == 0x00355C91u) {
+        uint32_t par = MEM32(esp + 0x44), base = 0, cnt = 0, lvl = 0;
+        if (guest_ram(par) && guest_ram(par + 0x20)) {
+            base = MEM32(par + 0x10);
+            cnt = MEM8(par + 0x14);
+            lvl = MEM8(par + 0x15);
+        }
+        if (node == base - 0x20u) {
+            float it[4] = { MEMF(esp + 0x94), MEMF(esp + 0x98), MEMF(esp + 0x9C), MEMF(esp + 0xA0) };
+            uint32_t c, finite = 0;
+            static int fix = -1;
+            /* The first 6 are reported in full; the fix below applies every time
+             * (the console's 0.52 crashed on the first one; later ones must not). */
+            int say = told < 6;
+            told++;
+            if (say)
+            fprintf(stderr, "[node] no nearest child: parent 0x%08X level %u count %u base 0x%08X, item %g %g %g %g (%s)\n",
+                    par, lvl, cnt, base, (double)it[0], (double)it[1], (double)it[2], (double)it[3],
+                    (it[0] == it[0] && it[1] == it[1] && it[2] == it[2]) ? "finite or inf" : "NaN");
+            for (c = 0; say && c < cnt && c < 8 && guest_ram(base) && guest_ram(base + 0x120); c++) {
+                float x = MEMF(base + c * 0x20) - it[0], y = MEMF(base + c * 0x20 + 4) - it[1],
+                      z = MEMF(base + c * 0x20 + 8) - it[2], d = x * x + y * y + z * z;
+                fprintf(stderr, "[node]   child %u: %g %g %g %g level %u count %u d2 %g\n", c,
+                        (double)MEMF(base + c * 0x20), (double)MEMF(base + c * 0x20 + 4),
+                        (double)MEMF(base + c * 0x20 + 8), (double)MEMF(base + c * 0x20 + 12),
+                        MEM8(base + c * 0x20 + 0x15), MEM8(base + c * 0x20 + 0x14), (double)d);
+                finite += d < 3.4028235e38f;
+            }
+            if (say)
+                fprintf(stderr, "[node]   children with a finite squared distance: %u of %u\n", finite, cnt);
+            if (fix < 0) {
+                const char *e = getenv("CLX_TREE_FIX");
+                fix = !(e && *e == '0');
+            }
+            /* With children and a valid array, take the first child instead of
+             * running into the title's own crash (the tree stays usable). */
+            if (fix && cnt > 0 && cnt <= 8 && guest_ram(base) && guest_ram(base + 0x120)) {
+                if (say)
+                    fprintf(stderr, "[node]   taking child 0 (CLX_TREE_FIX=0 to stop)\n");
+                node = base;
+                MEM32(esp + 4) = base;
+                edi = base;
+                link = MEM32(base + 0x10);
+            }
+            fflush(stderr);
+        }
+    }
+    if ((!guest_ram(link) || !guest_ram(link + 0x100)) && told < 6) {
+        told++;
+        fprintf(stderr, "[node] 0x00355430 from 0x%08X: node 0x%08X link 0x%08X (not RAM), call %u\n",
+                ret, node, link, n);
+        if (guest_ram(node - 0x20) && guest_ram(node + 0x40)) {
+            for (i = 0; i < 24; i += 8) {
+                fprintf(stderr, "[node]   0x%08X:", node - 0x20 + i * 4);
+                for (k = 0; k < 8; k++)
+                    fprintf(stderr, " %08X", MEM32(node - 0x20 + (i + k) * 4));
+                fprintf(stderr, "\n");
+            }
+        }
+        fprintf(stderr, "[node]   last calls (caller node link), oldest first:\n");
+        for (i = n > 64 ? n - 64 : 0; i < n; i++)
+            fprintf(stderr, "[node]     %08X %08X %08X\n", ring[i & 63][0], ring[i & 63][1],
+                    ring[i & 63][2]);
+        fprintf(stderr, "[node]   stack (code addresses from esp):");
+        for (i = 0, k = 0; i < 256 && k < 24; i++) {
+            uint32_t w = MEM32(esp + i * 4);
+            if (w >= 0x00011000u && w < 0x0048D000u) {
+                fprintf(stderr, " %08X", w);
+                k++;
+            }
+        }
+        fprintf(stderr, "\n");
+        fflush(stderr);
+    }
+    sub_00355430_gen();
+}
+
+/* ── Nearest-node search: keep a failed result inside its array ────────────
+ *
+ * 0x00354610 (base, query; count in ebx) picks the node nearest a query
+ * transform, returning base + best*32. When no entry is closer than FLT_MAX
+ * (best stays -1) it returns base - 32 and executes `mov dword ptr [0], 1`
+ * (the title's own debug break).
+ *
+ * The earth worm's bone palette holds a transform whose x/y/z are NaN
+ * (0xFFC00000, w = 212.0). Every distance is then NaN, best stays -1, and the
+ * caller at 0x00355C40 walks out of the array: node 0x01D7EA30 ->
+ * 0x01D7EA10 -> 0x3F00 -> 0x3EE0 -> 0xFFFFFFE0, which faults (or, with a
+ * RAM mirror, loops forever). The same crash reproduces with the official
+ * Windows and Linux builds.
+ *
+ * Treat the failed search as "use the first entry": it is inside the array,
+ * its loop counters are valid, and the walk terminates normally. Restore
+ * address 0 as well -- the generated assert overwrites the fake TIB/SEH head
+ * that lives there.
+ */
+extern void sub_00354610_gen(void);
+
+void sub_00354610(void)
+{
+    uint32_t base = MEM32(esp + 4);
+    uint32_t count = ebx;
+    uint32_t zero = MEM32(0);
+
+    sub_00354610_gen();
+    if (eax != base - 0x20)
+        return;                         /* an entry was found */
+    MEM32(0) = zero;
+    if (count && base >= 0x00010000u && base < 0x04000000u)
+        eax = base;
 }
 
 /* ── Debug probe: failed async reads (CLX_IO_PROBE=1) ─────────
@@ -969,6 +1153,42 @@ void recomp_unimpl(const char *text, uint32_t va)
     if (stop) abort();
 }
 
+/* The camera's right-stick response curve (0x002F9E50 reads this table at
+ * 0x00747798: six (input, output) pairs). Its first segment is a deadzone:
+ * input below 0.4 gives 0, so a small mouse pulse did nothing. While the
+ * mouse is captured, replace it with a straight line; restore the game's
+ * table when the mouse is released, so a real pad keeps its own feel.
+ * (PC mouse camera, clx_mouse.c; from blackn0x's PR 3.) */
+void clx_camera_curve_mouse(int on)
+{
+    static float original[6][2];
+    static int saved;
+    static const float linear[6][2] = {
+        { 0.0f, 0.0f }, { 0.2f, 0.2f }, { 0.4f, 0.4f },
+        { 0.6f, 0.6f }, { 0.8f, 0.8f }, { 1.0f, 1.0f },
+    };
+    int i;
+    if (on) {
+        if (!saved) {
+            for (i = 0; i < 6; i++) {
+                original[i][0] = MEMF(0x00747798u + (unsigned)i * 8);
+                original[i][1] = MEMF(0x0074779Cu + (unsigned)i * 8);
+            }
+            saved = 1;
+        }
+        for (i = 0; i < 6; i++) {
+            MEMF(0x00747798u + (unsigned)i * 8) = linear[i][0];
+            MEMF(0x0074779Cu + (unsigned)i * 8) = linear[i][1];
+        }
+    } else if (saved) {
+        for (i = 0; i < 6; i++) {
+            MEMF(0x00747798u + (unsigned)i * 8) = original[i][0];
+            MEMF(0x0074779Cu + (unsigned)i * 8) = original[i][1];
+        }
+        saved = 0;
+    }
+}
+
 /* ── Camera pitch speed (CLX_CAM_PITCH) ───────────────────────
  *
  * 0x002F99A0 (ecx = camera, eax = the player's input block 0x00763260+..)
@@ -988,9 +1208,11 @@ void sub_002F99A0(void)
 {
     static float k = -1.0f;
     int free_cam = g_clx.cam_free, invert_y = g_clx.cam_invert;   /* the menu changes them */
-    uint32_t cam = ecx, cfg, inp = eax;
+    uint32_t cam = ecx, cfg, inp = eax, ret = MEM32(esp);
     int32_t ry = 0;
-    float saved = 0.0f, follow = 0.0f;
+    float saved = 0.0f, follow = 0.0f, kk;
+    float mouse_yaw = 0.0f, mouse_pitch = 0.0f;
+    int mouse_on = 0;
 
     if (k < 0.0f) {
         const char *e = getenv("CLX_CAM_PITCH");
@@ -1009,8 +1231,61 @@ void sub_002F99A0(void)
         fprintf(stderr, "[cam] pitch speed x%g (CLX_CAM_PITCH), auto-follow %s (CLX_CAM_FREE)\n",
                 (double)k, free_cam ? "off" : "on");
     }
+    kk = k;
     cfg = cam ? MEM32(cam) : 0;
-    if (cfg < 0x00010000u || cfg >= 0x04000000u || (k == 1.0f && !free_cam && !invert_y)) {
+    /* Speed, free camera and invert only for the player camera (0x0003CB17): the
+     * slingshot's aim (0x002BBB4F) and the vehicles share this function and
+     * keep the title's tuning (0.62: the slingshot aimed wrong). */
+    {
+        /* Which camera user runs: a line when another one (the slingshot's
+         * aim returns to 0x002BBB54, vehicles elsewhere) takes over and when
+         * the player camera comes back; 400 lines at most. */
+        static uint32_t other;
+        static int lines;
+        if (ret != 0x0003CB1Cu && ret != other && lines < 400) {
+            lines++;
+            fprintf(stderr, "[cam] camera user 0x%08X%s starts\n", ret - 5,
+                    ret == 0x002BBB54u ? " (aim)" :
+                    ret == 0x002FBC10u ? " (pan)" : "");
+        } else if (ret == 0x0003CB1Cu && other && lines < 400) {
+            lines++;
+            fprintf(stderr, "[cam] player camera again (after 0x%08X)\n", other - 5);
+        }
+        other = ret == 0x0003CB1Cu ? 0 : ret;
+    }
+    if (ret != 0x0003CB1Cu && ret != 0x002FBC10u) {
+        /* Invert too: the slingshot's aim has the game's own "Invert Aim"
+         * (pause Options). Flipping it here sent shots the other way
+         * (user report, 0.45 with camera_invert_y=1). Vehicles keep the
+         * title's tuning as well. */
+        free_cam = 0, kk = 1.0f, invert_y = 0;
+        clx_mouse_set_mode(0);
+    } else {
+        int pan = ret == 0x002FBC10u;   /* frying pan / first-person aim */
+        clx_mouse_set_mode(pan ? 2 : 1);
+        if (!pan) {
+            static int seen;
+            if (!seen++)
+                fprintf(stderr, "[cam] player camera (0x0003CB17): pitch x%g, auto-follow %s\n",
+                        (double)k, free_cam ? "off" : "on");
+        } else {
+            /* The pan's aim camera keeps the title's tuning; only the mouse
+             * stick is fed into it. */
+            free_cam = 0, kk = 1.0f, invert_y = 0;
+        }
+        /* clx_mouse.c adds the mouse deflection to the pad report itself, so
+         * every camera/aim user sees it exactly like the right stick. This
+         * wrapper only tracks that the mouse is driving the camera (for the
+         * free camera and the capture timeout). */
+        if (cam >= 0x10000u && cam < 0x03FFF000u &&
+            cfg >= 0x10000u && cfg < 0x03FFF000u &&
+            (pan || !MEM32(cam + 0x80))) {
+            mouse_on = clx_mouse_take(cam, &mouse_yaw, &mouse_pitch);
+            if (mouse_on && !pan)
+                free_cam = 1;                /* no swing-back while the mouse drives it */
+        }
+    }
+    if (cfg < 0x00010000u || cfg >= 0x04000000u || (kk == 1.0f && !free_cam && !invert_y)) {
         sub_002F99A0_gen();
         return;
     }
@@ -1043,7 +1318,7 @@ void sub_002F99A0(void)
             if (hi > 0.0f && hi < 70.0f) MEMF(cfg + 0x1C) = hi + 10.0f;
         }
         saved = MEMF(cfg);
-        MEMF(cfg) = saved * k;
+        MEMF(cfg) = saved * kk;
         sub_002F99A0_gen();
         MEMF(cfg) = saved;
         if (free_cam) {

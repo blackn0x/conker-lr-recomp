@@ -513,6 +513,7 @@ static void rumble_send(int dev);
 /* A port's overlay menu (usb_gamepad.h): sees every report of pad 1 before
  * the title and may change it. */
 void (*usb_gamepad_hook)(uint8_t *report, unsigned host_buttons);
+void (*usb_gamepad_mouse_hook)(uint8_t *report);
 
 int usb_gamepad_report(int dev, uint8_t *out, int max)
 {
@@ -606,6 +607,8 @@ done:
         usb_gamepad_hook(out, host);
     if (s_pulse_end[dev])
         rumble_send(dev);           /* a usb_gamepad_pulse ends */
+    if (dev == 0 && usb_gamepad_mouse_hook)
+        usb_gamepad_mouse_hook(out);
     if (dev == 0) {                 /* RECOMP_LAT_TRACE: a change starts a measurement */
         static uint8_t last[20];
         if (memcmp(last + 2, out + 2, 18)) {

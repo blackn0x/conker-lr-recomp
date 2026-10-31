@@ -27,3 +27,8 @@ fps=30
 
 # 1 = skip the boot movie (read by clx.sh / clx.bat)
 #skip_intro=1
+
+# PC: borderless fullscreen (Alt+Enter / F11 toggles it at run time)
+fullscreen=borderless
+# PC: native mouse camera (F8 releases/captures it); settings in clx_mouse_options.txt
+mouse=1

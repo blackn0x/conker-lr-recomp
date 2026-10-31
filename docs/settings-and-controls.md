@@ -40,6 +40,16 @@ While the menu is open, the game gets no input. It keeps running: a cutscene goe
 The list scrolls (about 11 lines at once). On a PC the window's close button
 and Alt+F4 also quit (the settings are saved if the menu is open).
 
+## Skipping movies and cutscenes
+
+A, START (+) or L skips a cutscene, also one seen for the first time; the
+first press only shows "SKIP THIS CUTSCENE? PRESS AGAIN", and a second press
+within 3 seconds skips it. Cutscenes the game marks unskippable play to the
+end. The boot movie and other movies work the same way with A or START
+("SKIP THIS MOVIE? PRESS AGAIN"). `CLX_SKIP_CUTSCENES` in `clx_env.txt`:
+`press` (default), `all` (also the unskippable ones), `1` (every cutscene
+ends at once), `0` (the game's own rules).
+
 ## clx_options.txt
 
 The menu saves its values here. You can also edit the file with a text editor. One
@@ -155,4 +165,38 @@ half: `+` or `-` and the axis name). Controls: `up down left right start
 lthumb rthumb a b x y black white lt rt`; Back stays the menu button. The
 menu's Remap lines write these lines; Reset controls removes them.
 
-Not available yet: mouse look, key rebinding inside the menu, a window-size setting.
+### PC mouse camera and fullscreen
+
+The PC build reads relative mouse motion and feeds it through the game's own
+right-stick input, so the camera follows the mouse with the game's normal
+camera logic. It uses the free camera, so the view stays where you point it.
+
+| Input | Action |
+|---|---|
+| Mouse | camera |
+| F8 | release / capture the mouse |
+| Esc | settings menu (the mouse is released while it is open) |
+| Alt+Enter, F11 | borderless fullscreen on / off |
+
+The mouse is captured only while the game has focus and the in-game camera is
+active, so the title screen and menus use a normal pointer.
+
+Settings live in `clx_mouse_options.txt` next to the executable:
+
+| Key | Meaning |
+|---|---|
+| `sensitivity` | degrees of rotation per mouse pixel (default 0.06) |
+| `sensitivity_y` | the same vertically (0 or absent: use `sensitivity`) |
+| `invert_x` | `1` reverses left/right |
+| `invert_y` | `1` = mouse up looks up (the shipped default); `0` = inverted |
+| `aim_gain` | extra gain while a weapon's aim camera is active (default 1.8) |
+
+The mouse also drives the weapon aim camera (frying pan, baseball bat); the
+slingshot's aim and the vehicles keep the pad. The aim camera turns more
+slowly than the normal one, hence `aim_gain`.
+
+Start the Windows build with `clx.bat` (`clx.sh` on Linux). Mouse and borderless
+fullscreen are enabled from `clx_options.txt` with `mouse=1` and
+`fullscreen=borderless`; both are in the shipped PC options file.
+
+Not yet: a window-size setting.
