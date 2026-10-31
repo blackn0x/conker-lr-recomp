@@ -260,6 +260,12 @@ DWORD xbox_InputGetCapabilities(DWORD dwPort, DWORD dwFlags, XBOX_INPUT_CAPABILI
 static SDL_GameController *g_pads[XBOX_MAX_CONTROLLERS];
 static BOOL  g_controller_connected[XBOX_MAX_CONTROLLERS];
 static DWORD g_packet[XBOX_MAX_CONTROLLERS];
+#if !defined(__SWITCH__)
+/* Pads past the four ports, open so a press can claim pad 1. */
+#define SPARE_PADS 8
+static SDL_GameController *g_spare[SPARE_PADS];
+static BOOL g_pad_used[XBOX_MAX_CONTROLLERS];   /* pressed since it got its port */
+#endif
 
 /* Open up to XBOX_MAX_CONTROLLERS attached game controllers. */
 static void open_controllers(void)
@@ -300,6 +306,11 @@ static void refresh_controllers(void)
             g_pads[slot] = NULL;
             g_controller_connected[slot] = FALSE;
         }
+    for (j = 0; j < SPARE_PADS; j++)
+        if (g_spare[j] && !SDL_GameControllerGetAttached(g_spare[j])) {
+            SDL_GameControllerClose(g_spare[j]);
+            g_spare[j] = NULL;
+        }
     for (i = 0; i < SDL_NumJoysticks(); i++) {
         SDL_JoystickID id;
         int open = 0;
@@ -311,15 +322,69 @@ static void refresh_controllers(void)
                 open = 1;
         if (open)
             continue;
+        for (j = 0; j < SPARE_PADS; j++)
+            if (g_spare[j] && SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(g_spare[j])) == id)
+                open = 1;
+        if (open)
+            continue;
         for (slot = 0; slot < XBOX_MAX_CONTROLLERS && g_pads[slot]; slot++) { }
-        if (slot == XBOX_MAX_CONTROLLERS)
-            break;
+        if (slot == XBOX_MAX_CONTROLLERS) {
+            /* Ports full: open it as a spare, so a press can claim pad 1. */
+            for (j = 0; j < SPARE_PADS && g_spare[j]; j++) { }
+            if (j < SPARE_PADS && (g_spare[j] = SDL_GameControllerOpen(i)))
+                fprintf(stderr, "  [PAD] spare: %s\n", SDL_GameControllerName(g_spare[j]));
+            continue;
+        }
         if ((g_pads[slot] = SDL_GameControllerOpen(i))) {
             g_controller_connected[slot] = TRUE;
+            g_pad_used[slot] = FALSE;
             fprintf(stderr, "  [PAD] controller %d: %s\n", slot + 1,
                     SDL_GameControllerName(g_pads[slot]));
         }
     }
+}
+
+static BOOL pad_pressed(SDL_GameController *c)
+{
+    int b;
+    for (b = 0; b < SDL_CONTROLLER_BUTTON_MAX; b++)
+        if (SDL_GameControllerGetButton(c, (SDL_GameControllerButton)b))
+            return TRUE;
+    return SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > 16000
+        || SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > 16000;
+}
+
+/* Pad 1 is the first pad in SDL's order, which can be one that is never
+ * used (a streaming host's virtual pads, listed before the real one).
+ * While pad 1 has pressed nothing, the first pad that presses a button
+ * takes its place. */
+static void pad_follow_press(void)
+{
+    SDL_GameController *t;
+    int k;
+    for (k = 0; k < XBOX_MAX_CONTROLLERS; k++)
+        if (g_pads[k] && !g_pad_used[k] && pad_pressed(g_pads[k]))
+            g_pad_used[k] = TRUE;
+    if (g_pads[0] && g_pad_used[0])
+        return;
+    for (k = 1; k < XBOX_MAX_CONTROLLERS; k++)
+        if (g_pads[k] && g_pad_used[k]) {
+            t = g_pads[0]; g_pads[0] = g_pads[k]; g_pads[k] = t;
+            g_pad_used[k] = FALSE;
+            g_pad_used[0] = TRUE;
+            g_controller_connected[k] = g_pads[k] != NULL;
+            g_controller_connected[0] = TRUE;
+            fprintf(stderr, "  [PAD] controller 1 is now %s\n", SDL_GameControllerName(g_pads[0]));
+            return;
+        }
+    for (k = 0; k < SPARE_PADS; k++)
+        if (g_spare[k] && pad_pressed(g_spare[k])) {
+            t = g_pads[0]; g_pads[0] = g_spare[k]; g_spare[k] = t;
+            g_pad_used[0] = TRUE;
+            g_controller_connected[0] = TRUE;
+            fprintf(stderr, "  [PAD] controller 1 is now %s\n", SDL_GameControllerName(g_pads[0]));
+            return;
+        }
 }
 #endif
 
@@ -559,6 +624,7 @@ DWORD xbox_InputGetState(DWORD dwPort, XBOX_INPUT_STATE *pState)
             last = now;
             refresh_controllers();
         }
+        pad_follow_press();
         rumble_test_tick();
     }
 #endif

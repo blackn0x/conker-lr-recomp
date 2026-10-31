@@ -260,7 +260,11 @@ static GLint to_stored(uint32_t v, uint32_t p, uint32_t l)
     return (GLint)(((uint64_t)v * p + l / 2) / l);
 }
 
-#define GL_MAX_SURF 32
+/* Conker renders a 32x32 specular map per shiny object every frame (~40 in
+ * the save menu, 50 surfaces in all): with 32 slots they evicted each other
+ * between being drawn and sampled, and the objects read an empty surface --
+ * green here, garbage (rainbow) on Vulkan. */
+#define GL_MAX_SURF 128
 static GlSurf  s_surf[GL_MAX_SURF];
 static GlSurf *s_last;                  /* last surface drawn or cleared */
 static int     s_drew_any;              /* the title has drawn something */
