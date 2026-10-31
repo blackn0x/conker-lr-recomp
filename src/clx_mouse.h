@@ -8,16 +8,10 @@
  *
  * The render thread owns SDL: clx_mouse_motion() receives the relative
  * motion events and clx_mouse_frame() maintains capture and fullscreen.
- * The guest camera thread consumes the accumulated angle in
- * clx_mouse_take() exactly once per rendered frame.
- *
- * clx_mouse_take() returns 1 when the mouse currently drives the camera;
- * *yaw is in radians (added to the camera's yaw angle) and *pitch is in
- * degrees (added to its pitch angle). */
-int clx_mouse_take(uint32_t camera, float *yaw, float *pitch);
-
-/* The one-frame deflection as raw USB pad axes (-32767..32767). */
-int clx_mouse_pad(int *rx, int *ry);
+ * The guest camera thread calls clx_mouse_camera_active() to refresh the
+ * activity timeout and check capture. Motion is delivered only through the
+ * USB report, never as a second direct camera-angle adjustment. */
+int clx_mouse_camera_active(void);
 
 /* Add the deflection to pad 1's 20-byte USB report (RX at 16, RY at 18), so
  * every game system (player aim, camera users, the normal player camera)
@@ -25,7 +19,8 @@ int clx_mouse_pad(int *rx, int *ry);
 void clx_mouse_report(uint8_t *report);
 
 /* Which camera is running: 0 = off (pad only), 1 = player camera,
- * 2 = weapon aim (the slower aim camera gets the aim_gain boost). */
+ * 2 = weapon aim (the slower aim camera gets the aim_gain boost).
+ * Guest thread only: also applies/restores the guest's response curve. */
 void clx_mouse_set_mode(int mode);
 
 /* Preferred names used by the renderer. */
