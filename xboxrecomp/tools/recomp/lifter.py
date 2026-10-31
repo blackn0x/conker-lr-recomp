@@ -507,6 +507,12 @@ SSE_COMPARES = ("comiss", "comisd", "ucomiss", "ucomisd")
 
 def _lahf_value(flag_setter, flag_ops):
     """C expression for the byte LAHF loads, or None if a flag is unknown."""
+    if flag_setter in ("fcomi", "fcomip", "fcompi", "fucomi", "fucomip", "fucompi"):
+        # FCOMI/FUCOMI write EFLAGS, not the x87 status word. They clear SF,
+        # AF and OF. The generic path cannot answer JS for these setters and
+        # used to discard LAHF entirely, leaving stale AH in float tests.
+        return ("(uint8_t)(0x02 | (g_fp_cmp == 2 ? 0x45 : "
+                "g_fp_cmp < 0 ? 0x01 : g_fp_cmp == 0 ? 0x40 : 0))")
     if flag_setter in SSE_COMPARES:
         # ZF, PF, CF = 1,1,1 unordered; 0,0,1 below; 1,0,0 equal; 0,0,0 above.
         # SF (and OF, AF) are cleared.
