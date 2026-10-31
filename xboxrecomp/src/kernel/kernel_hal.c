@@ -20,7 +20,7 @@
 #include <stdlib.h>
 #if defined(_WIN32)
 #include <intrin.h>
-#else
+#elif !defined(__SWITCH__)   /* devkitA64 has no dlfcn.h */
 #include <dlfcn.h>
 #endif
 #if defined(_MSC_VER) && !defined(__clang__)
@@ -164,7 +164,7 @@ void xbox_IrqlDumpHolders(void)
     for (i = 0; i < IRQL_HOLDERS; i++) {
         LONG t = InterlockedCompareExchange(&s_holders[i].tid, 0, 0);
         if (t) {
-#if !defined(_WIN32)
+#if !defined(_WIN32) && !defined(__SWITCH__)
             /* Module-relative, so a stripped build's report can be read
              * against the symbols (ASLR moves the module every run). */
             Dl_info di;
