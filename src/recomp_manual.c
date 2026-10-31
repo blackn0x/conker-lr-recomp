@@ -1107,6 +1107,8 @@ void clx_camera_curve_mouse(int on)
         { 0.6f, 0.6f }, { 0.8f, 0.8f }, { 1.0f, 1.0f },
     };
     int i;
+    if (!!on == saved)
+        return;
     if (on) {
         if (!saved) {
             for (i = 0; i < 6; i++) {
@@ -1150,7 +1152,6 @@ void sub_002F99A0(void)
     uint32_t cam = ecx, cfg, inp = eax, ret = MEM32(esp);
     int32_t ry = 0;
     float saved = 0.0f, follow = 0.0f, kk;
-    float mouse_yaw = 0.0f, mouse_pitch = 0.0f;
     int mouse_on = 0;
 
     if (k < 0.0f) {
@@ -1219,7 +1220,7 @@ void sub_002F99A0(void)
         if (cam >= 0x10000u && cam < 0x03FFF000u &&
             cfg >= 0x10000u && cfg < 0x03FFF000u &&
             (pan || !MEM32(cam + 0x80))) {
-            mouse_on = clx_mouse_take(cam, &mouse_yaw, &mouse_pitch);
+            mouse_on = clx_mouse_camera_active();
             if (mouse_on && !pan)
                 free_cam = 1;                /* no swing-back while the mouse drives it */
         }
