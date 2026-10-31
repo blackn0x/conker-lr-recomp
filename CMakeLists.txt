@@ -58,6 +58,19 @@ set(GAME_SOURCES
     src/clx_mouse.c
 )
 
+option(CLX_EXPERIMENTAL_INPUT_COMPAT "Build the opt-in Windows input/menu test bridge" OFF)
+if(CLX_EXPERIMENTAL_INPUT_COMPAT)
+    if(NOT WIN32 OR MSVC)
+        message(FATAL_ERROR "The experimental input bridge is tested with Windows/MinGW only")
+    endif()
+    if(NOT EXISTS "${NFSU2_GEN_DIR}/clx_input_compat.marker")
+        message(FATAL_ERROR "Run tools/windows_input_compat.py on a separate generated-code directory first")
+    endif()
+    list(APPEND GAME_SOURCES src/clx_native_pad.c)
+elseif(EXISTS "${NFSU2_GEN_DIR}/clx_input_compat.marker")
+    message(FATAL_ERROR "This generated directory is patched for CLX_EXPERIMENTAL_INPUT_COMPAT; enable it or use fresh generated code")
+endif()
+
 if(ANDROID)
     # SDLActivity loads libmain.so and calls its SDL_main (src/android.c).
     list(APPEND GAME_SOURCES src/android.c)

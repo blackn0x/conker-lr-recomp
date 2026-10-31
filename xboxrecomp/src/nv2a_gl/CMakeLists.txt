@@ -13,7 +13,7 @@ add_library(xbox_nv2a_gl STATIC
 )
 target_include_directories(xbox_nv2a_gl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
-if(NINTENDO_SWITCH)
+if(NINTENDO_SWITCH OR (WIN32 AND CLX_EXPERIMENTAL_INPUT_COMPAT))
     find_package(SDL2 REQUIRED)
     target_link_libraries(xbox_nv2a_gl PUBLIC SDL2::SDL2)
 else()
