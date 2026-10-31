@@ -509,12 +509,6 @@ FPU_EFLAGS_COMPARES = ("fcompi", "fcomip", "fucomi", "fucompi", "fucomip", "fcom
 
 def _lahf_value(flag_setter, flag_ops):
     """C expression for the byte LAHF loads, or None if a flag is unknown."""
-    if flag_setter in ("fcomi", "fcomip", "fcompi", "fucomi", "fucomip", "fucompi"):
-        # FCOMI/FUCOMI write EFLAGS, not the x87 status word. They clear SF,
-        # AF and OF. The generic path cannot answer JS for these setters and
-        # used to discard LAHF entirely, leaving stale AH in float tests.
-        return ("(uint8_t)(0x02 | (g_fp_cmp == 2 ? 0x45 : "
-                "g_fp_cmp < 0 ? 0x01 : g_fp_cmp == 0 ? 0x40 : 0))")
     if flag_setter in SSE_COMPARES:
         # ZF, PF, CF = 1,1,1 unordered; 0,0,1 below; 1,0,0 equal; 0,0,0 above.
         # SF (and OF, AF) are cleared.
@@ -522,6 +516,8 @@ def _lahf_value(flag_setter, flag_ops):
         return (f"(uint8_t)(0x02 | ((_fca == _fcb || {un}) ? 0x40 : 0)"
                 f" | ({un} ? 0x04 : 0) | ((_fca < _fcb || {un}) ? 0x01 : 0))")
     if flag_setter in FPU_EFLAGS_COMPARES:
+        # FCOMI/FUCOMI write EFLAGS (SF, AF, OF cleared). Found by blackn0x
+        # (#8) and nydal91 (#10); one block is kept.
         # Same flags from g_fp_cmp (-1 less, 0 equal, 1 greater, 2 unordered).
         # There is no js for these, so the loop below gave up and lahf lifted
         # to a comment: Conker's yaw (0x002B0CB0: `fucomip; fstp; lahf; test
