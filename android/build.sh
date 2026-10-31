@@ -60,7 +60,7 @@ ninja -C "$BUILD_DIR" -j"$JOBS"
 
 echo "== APK $VERSION"
 rm -rf "$STAGE/classes" "$STAGE/dex" "$STAGE/res" "$STAGE/assets" "$STAGE/lib" "$STAGE"/*.apk "$STAGE/compiled.zip"
-mkdir -p "$STAGE/classes" "$STAGE/dex" "$STAGE/res/drawable" "$STAGE/assets" "$STAGE/lib/arm64-v8a"
+mkdir -p "$STAGE/classes" "$STAGE/dex" "$STAGE/res/drawable" "$STAGE/res/xml" "$STAGE/assets" "$STAGE/lib/arm64-v8a"
 
 # Native libraries: stripped in the APK, unstripped kept for symbolising crash reports.
 mkdir -p "$OUT/android/symbols"
@@ -95,6 +95,7 @@ def c(t,d): return struct.pack('>I',len(d))+t+d+struct.pack('>I',zlib.crc32(t+d)
 sys.stdout.buffer.write(b'\x89PNG\r\n\x1a\n'+c(b'IHDR',struct.pack('>IIBBBBB',1,1,8,2,0,0,0))+c(b'IDAT',zlib.compress(b'\0\x40\x40\x40'))+c(b'IEND',b''))" \
         > "$STAGE/res/drawable/icon.png"
 fi
+cp "$REPO/android/res/xml/"*.xml "$STAGE/res/xml/"
 cp "$REPO/android/clx_options.txt" "$REPO/android/clx_env.txt" "$STAGE/assets/"
 "$BT/aapt2" compile --dir "$STAGE/res" -o "$STAGE/compiled.zip"
 "$BT/aapt2" link -o "$STAGE/unsigned.apk" -I "$PLATFORM" \

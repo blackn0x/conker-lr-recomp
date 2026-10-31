@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ Game Mode (AndroidManifest.xml points here): the game opts in to
+     the Performance mode that the phone's game dashboard or booster offers.
+     Downscaling and FPS overrides are off, since they would resize SDL's
+     surface and fight the renderer's own pacing. -->
+<game-mode-config xmlns:android="http://schemas.android.com/apk/res/android"
+    android:supportsPerformanceGameMode="true"
+    android:supportsBatteryGameMode="true"
+    android:allowGameAngleDriver="false"
+    android:allowGameDownscaling="false"
+    android:allowGameFpsOverride="false" />

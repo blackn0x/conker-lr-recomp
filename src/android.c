@@ -264,6 +264,8 @@ void android_boot(void)
     printf("  page size  %ld\n", page);
     printf("  cpus       %ld\n", sysconf(_SC_NPROCESSORS_ONLN));
     printf("  memory     %ld MB\n", (long)(sysconf(_SC_PHYS_PAGES) * (page / 1024) / 1024));
+    /* Set by ClxActivity.gameMode() (Android 12+). */
+    printf("  game mode  %s\n", getenv("CLX_GAME_MODE") ? getenv("CLX_GAME_MODE") : "n/a");
 
     make_dir(CLX_DATA_DIR);
     last_exit(CLX_DATA_DIR "/last_exit.txt");
