@@ -18,6 +18,37 @@ from tools.recomp.lifter import _lahf_value
 from tools.recomp.translator import FunctionTranslator
 
 
+def _compiler_command(value, windows=None):
+    # CC may be a bare executable path (including spaces), or a command with
+    # flags. POSIX shlex eats the backslashes in unquoted Windows paths.
+    if shutil.which(value):
+        return [value]
+    if windows is None:
+        windows = os.name == "nt"
+    command = shlex.split(value, posix=not windows)
+    if windows:
+        command = [part[1:-1] if len(part) >= 2 and part[0] == part[-1]
+                   and part[0] in "\"'" else part for part in command]
+    return command
+
+
+@pytest.mark.parametrize("value,windows,expected", [
+    (r"C:\LLVM\bin\clang.exe", True, [r"C:\LLVM\bin\clang.exe"]),
+    (r'"C:\Program Files\LLVM\bin\clang.exe" -O0', True,
+     [r"C:\Program Files\LLVM\bin\clang.exe", "-O0"]),
+    ('cc -DNAME="two words"', False, ["cc", "-DNAME=two words"]),
+    ("", True, []),
+])
+def test_compiler_command(value, windows, expected):
+    assert _compiler_command(value, windows) == expected
+
+
+def test_bare_compiler_path_with_spaces(monkeypatch):
+    path = r"C:\Program Files\LLVM\bin\clang.exe"
+    monkeypatch.setattr(shutil, "which", lambda value: path if value == path else None)
+    assert _compiler_command(path, True) == [path]
+
+
 @pytest.mark.parametrize("setter", ["fcomi", "fcomip", "fcompi", "fucomi", "fucomip", "fucompi"])
 def test_x87_compare_has_lahf_value(setter):
     assert _lahf_value(setter, []) is not None
@@ -30,8 +61,10 @@ def test_x87_compare_has_lahf_value(setter):
 def test_lifted_lahf_matches_cpu(tmp_path, opcode, mnemonic):
     if platform.machine().lower() not in ("amd64", "x86_64"):
         pytest.skip("x86-64 reference CPU required")
-    compiler = shlex.split(os.environ.get("CC", "cc"))
-    if not shutil.which(compiler[0]):
+    compiler = _compiler_command(os.environ.get("CC", "cc"))
+    if not compiler or not shutil.which(compiler[0]):
+        if "CC" in os.environ:
+            pytest.fail("CC does not name an available C compiler")
         pytest.skip("C compiler required (set CC)")
     # compare st(0),st(1); fstp st(0); lahf; test ah,44h;
     # jp nonzero; mov ebx,0; jmp done; nonzero: mov ebx,1; done: ret
