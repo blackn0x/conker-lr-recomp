@@ -2635,6 +2635,9 @@ swap:
                 recomp_host_quit("window closed");
             if (e.type == SDL_MOUSEMOTION)
                 clx_mouse_motion(e.motion.xrel, e.motion.yrel);
+            if (getenv("CLX_GFX_INPUT_DIAG") && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP))
+                fprintf(stderr, "[input-event] key=%d down=%d\n", (int)e.key.keysym.scancode,
+                        e.type == SDL_KEYDOWN);
         }
         clx_mouse_frame(s_win);
     }

@@ -44,3 +44,6 @@ python3 -m tools.recomp "$XBE" --game-name "Conker: Live & Reloaded" --all --spl
     ${TRACE_FUNCS:+--trace-functions "$TRACE_FUNCS"}
 # Subtitle box getters (src/recomp_manual.c): the lifter writes the literals.
 python3 "$HERE/tools/bubble_patch.py" "$GEN"
+
+# Private generated-code instrumentation for this experimental test branch.
+python3 "$HERE/tools/windows_bisect_test.py" "$GEN"

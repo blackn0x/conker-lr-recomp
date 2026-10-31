@@ -54,6 +54,7 @@ set(GAME_SOURCES
     src/clx_menu.c
     src/clx_buttons.c
     src/clx_mouse.c
+    src/clx_native_pad.c
 )
 
 if(MSVC)

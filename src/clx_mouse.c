@@ -183,6 +183,17 @@ void clx_mouse_frame(SDL_Window *window)
     }
 
     keys = SDL_GetKeyboardState(&nkeys);
+    if (getenv("CLX_GFX_INPUT_DIAG")) {
+        static Uint32 last;
+        Uint32 now = SDL_GetTicks();
+        if ((Uint32)(now - last) >= 1000) {
+            last = now;
+            fprintf(stderr, "[input-focus] flags=%08X keyboard-focus=%d space=%d enter=%d\n",
+                    SDL_GetWindowFlags(window), SDL_GetKeyboardFocus() == window,
+                    keys && nkeys > SDL_SCANCODE_SPACE ? keys[SDL_SCANCODE_SPACE] : -1,
+                    keys && nkeys > SDL_SCANCODE_RETURN ? keys[SDL_SCANCODE_RETURN] : -1);
+        }
+    }
     f8 = keys && nkeys > SDL_SCANCODE_F8 && keys[SDL_SCANCODE_F8];
     if (f8 && !was_f8)
         enabled = !enabled;
